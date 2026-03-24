@@ -1,0 +1,1 @@
+uvicorn api_ai.src.main:app --reload
