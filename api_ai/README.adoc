@@ -1,1 +1,209 @@
-uvicorn api_ai.src.main:app --reload
+= *API AI*
+:toc:
+:toclevels: 2
+
+== *Introduction*
+
+`api_ai` is a HTTP microservice built with FastAPI for text processing tasks within the RAG platform.
+
+Currently exposes two main capabilities:
+
+* Generation of *embeddings* using OpenAI
+* Text splitting into configurable *chunks* for indexing and retrieval.
+
+This service abstracts away the complexity of interacting with OpenAI and LangChain.
+It is think to be integrate with crawler component of the project, which consumes the endpoints for chunking and embeddings before persisting the information in ChromaDB
+
+== *Features*
+
+* Embeddings generation with `text-embedding-3-large` model.
+* Text splitting with `RecursiveCharacterTextSplitter`.
+* Configurable `chunk_size` and `chunk_overlap` per request.
+* Resource initialization at API startup.
+* Simple HTTP endpoints for integration with other services.
+
+== *Technologies Used*
+
+* Python 3.12 recommended
+* FastAPI
+* Uvicorn
+* LangChain
+* LangChain OpenAI
+* Docker
+
+== *Main Structure*
+
+* [src/main.py](src/main.py): defines the FastAPI application, lifecycle, service, and endpoints.
+* [src/settings.py](src/settings.py): API configuration constants and default parameters.
+* [requirements.txt](requirements.txt): service dependencies.
+* [Dockerfile](Dockerfile): image to run the API in a container.
+
+== *Configuration*
+
+The API use for default these values:
+
+* Embedding model: `text-embedding-3-large`
+* `chunk_size`: `1000`
+* `chunk_overlap`: `200`
+
+Before starting the service, make sure to define the OpenAI environment variable:
+
+[source,bash]
+----
+export OPENAI_API_KEY="your_api_key"
+----
+
+== *Running without Docker*
+
+=== 1. Enter the service directory
+
+[source,bash]
+----
+cd api_ai
+----
+
+=== 2. Create and activate a virtual environment
+
+[source,bash]
+----
+python3.12 -m venv .venv
+source .venv/bin/activate
+----
+
+=== 3. Install dependencies
+
+[source,bash]
+----
+pip install -r requirements.txt
+----
+
+=== 4. Start the API
+
+[source,bash]
+----
+uvicorn src.main:app --host 0.0.0.0 --port 8000 --reload
+----
+
+The API will be available at:
+
+* `http://localhost:8000`
+* interactive documentation: `http://localhost:8000/docs`
+
+== *Running with Docker*
+
+From the `api_ai` directory, build the image:
+
+[source,bash]
+----
+docker build -t rag-platform-api-ai .
+----
+
+Then run the container:
+
+[source,bash]
+----
+docker run --rm -p 8000:8000 \
+	-e OPENAI_API_KEY="your_api_key" \
+	rag-platform-api-ai
+----
+
+== *Available Endpoints*
+
+=== `POST /get-embedding`
+
+Generates the embedding of a text.
+
+==== Request
+
+[source,json]
+----
+{
+	"text": "Texto para generar embedding"
+}
+----
+
+==== Response
+
+[source,json]
+----
+{
+	"embedding": [0.0123, -0.0456, 0.0789]
+}
+----
+
+=== `POST /split-text`
+
+Split a long text into smaller chunks based on the specified `chunk_size` and `chunk_overlap`.
+
+==== Request
+
+[source,json]
+----
+{
+	"text": "Long text to split",
+	"chunk_size": 1000,
+	"chunk_overlap": 200
+}
+----
+
+==== Response
+
+[source,json]
+----
+{
+	"count": 3,
+	"chunks": [
+		"chunk 1",
+		"chunk 2",
+		"chunk 3"
+	]
+}
+----
+
+== *Example with curl*
+
+=== *Test chunking*
+
+[source,bash]
+----
+curl -X POST http://localhost:8000/split-text \
+	-H "Content-Type: application/json" \
+	-d '{
+		"text": "Este es un texto de ejemplo para dividir en chunks.",
+		"chunk_size": 20,
+		"chunk_overlap": 5
+	}'
+----
+
+=== *Test embeddings*
+
+[source,bash]
+----
+curl -X POST http://localhost:8000/get-embedding \
+	-H "Content-Type: application/json" \
+	-d '{
+		"text": "Segunda Guerra Mundial"
+	}'
+----
+
+== *Integration with the crawler*
+
+In the main project, environment variables are used to point to the service:
+
+[source,bash]
+----
+export EMBEDDING_API_URL=http://localhost:8000/get-embedding
+export CHUNKING_API_URL=http://localhost:8000/split-text
+----
+
+This way, the crawler can delegate the generation of chunks and embeddings to this API.
+
+== *Notes*
+
+* For local development, Python 3.12 is recommended.
+* The embedding model has an associated cost based on OpenAI API usage.
+* If the service does not respond, first check `OPENAI_API_KEY` and installed dependencies.
+
+== *Contact*
+
+Author: *Nahuel Tabasso*
