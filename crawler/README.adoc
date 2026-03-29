@@ -6,3 +6,4 @@ export EMBEDDING_API_URL=http://localhost:8000/get-embedding
 export CHUNKING_API_URL=http://localhost:8000/split-text
 export CHROMA_DB_DIR=/Users/<your user>/Documents/Python/rag_platform/chroma_db
 export OPENAI_API_KEY=<api>
+export BASE_ERROR_DIR=<>

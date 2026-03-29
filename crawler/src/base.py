@@ -58,7 +58,8 @@ class CustomSettings():
                  collection_name: str,
                  base_url: str,
                  api_chunks: str | None,
-                 api_embeddings: str | None) -> None:
+                 api_embeddings: str | None,
+                 error_output_filename: str = '') -> None:
         """Constructor
 
         Args:
@@ -80,7 +81,7 @@ class CustomSettings():
         self.base_url = base_url
         self.api_chunks = api_chunks
         self.api_embeddings = api_embeddings
-        
+        self.error_output_filename = error_output_filename
     
     def to_dict(self) -> dict:
         # Export only instance data (avoid methods and internals)
