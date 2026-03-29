@@ -15,6 +15,7 @@ CUSTOM_SETTINGS = CustomSettings(
     base_url='https://es.wikipedia.org/wiki/Segunda_Guerra_Mundial',
     api_chunks=None,
     api_embeddings=None,
+    error_output_filename='ww2_wikipedia.txt',
     item_pipelines={
         'crawler.src.pipeline.ValidateFieldsPipeline': 100,
         'crawler.src.pipeline.ChunksPipeline': 200,
