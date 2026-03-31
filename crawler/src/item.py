@@ -8,3 +8,7 @@ class ItemDTO(Item):
     date = Field()
     site = Field()
     chunks = Field()
+    
+class UrlDTO(Item):
+    
+    urls = Field()
