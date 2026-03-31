@@ -4,10 +4,12 @@ from langchain_openai import OpenAIEmbeddings
 from crawler.src.item import ItemDTO
 from crawler.src.base import CommonSpider
 from crawler.src.settings import CHROMA_DB_DIR, EMBEDDING_MODEL_NAME
+from crawler.src.util import register_error_url
 import httpx
 import os
 import chromadb
 import hashlib
+
 
 class ValidateFieldsPipeline:
     
@@ -26,19 +28,31 @@ class ValidateFieldsPipeline:
         site = item.get('site')
         title = item.get('title')
         content = item.get('content')
-
+        
         if url is not None and not str(url).startswith("http"):
+            register_error_url(spider, str(url), "Invalid URL format")
             raise DropItem(f"Invalid URL: {url}")
         if not site:
+            register_error_url(spider, str(url), "Missing site field")
             raise DropItem("Missing site field")
         if not title:
+            register_error_url(spider, str(url), "Missing title field")
             raise DropItem("Missing title field")
         if not content:
+            register_error_url(spider, str(url), "Missing content field")
             raise DropItem("Missing content field")
 
         return item
     
 class BaseProcessingPipeline:
+    
+    def __init__(self):
+        self.chunk_size = None
+        self.chunk_overlap = None
+        
+    def open_spider(self, spider: CommonSpider):
+        self.chunk_size = spider.config.chunk_size
+        self.chunk_overlap = spider.config.chunk_overlap
 
     def _do_request(self, api_url: str, payload: dict, response_key: str, timeout: int = 1000):
         try:
@@ -62,7 +76,9 @@ class BaseProcessingPipeline:
         api_url = os.environ.get("CHUNKING_API_URL", "")
         if api_url == '':
             raise ValueError("CHUNKING_API_URL environment variable is not set.")
-        body = {"text": text, "chunk_size": 4000, "chunk_overlap": 800}
+        body = {"text": text,
+                "chunk_size": self.chunk_size,
+                "chunk_overlap": self.chunk_overlap}
         return self._do_request(api_url, body, 'chunks')
     
 class ChunksPipeline(BaseProcessingPipeline):
@@ -77,6 +93,9 @@ class ChunksPipeline(BaseProcessingPipeline):
         spider.logger.info(f"Generating chunks for content of length {len(content)}")
         chunks = self.generate_chunks(content)
         if not chunks:
+            register_error_url(spider,
+                               str(item.get('url')),
+                               "Failed to generate chunks")
             raise DropItem("Failed to generate chunks")
         spider.logger.info(f"Generated chunks: {len(chunks)}")
         item['chunks'] = chunks
@@ -94,6 +113,9 @@ class EmbeddingsPipeline(BaseProcessingPipeline):
         spider.logger.info(f"Generating embeddings for {len(chunks)} chunks")
         embeddings = [self.generate_embedding(chunk) for chunk in chunks]
         if not embeddings:
+            register_error_url(spider,
+                               str(item.get('url')),
+                               "Failed to generate embeddings")
             raise DropItem("Failed to generate embeddings")
         spider.logger.info(f"Generated embeddings for {len(embeddings)} chunks")
         item['embeddings'] = embeddings
@@ -153,6 +175,6 @@ class SaveToChromaDBPipeline:
             metadatas=metadatas,
             ids=ids
         )
-        spider.logger.info(f"Embeddings generados e insertados para {len(chunks)} chunks")
+        spider.logger.info(f"Embeddings generated and inserted for {len(chunks)} chunks")
         spider.logger.info(f"Chunks saved to ChromaDB - Collection: {self.collection_name}")
         return item
