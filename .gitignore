@@ -44,3 +44,6 @@ pip-wheel-metadata/
 
 # Logs
 *.log
+
+# Error directory
+error/
