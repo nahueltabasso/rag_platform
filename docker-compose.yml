@@ -1,0 +1,18 @@
+version: '3.8'
+services:
+  api_ai:
+    container_name: api_ai
+    build: 
+      context: ./
+      dockerfile: ./api_ai/Dockerfile
+    env_file: ./api_ai/.env
+    ports:
+      - "8000:8000"
+    networks:
+      - rag_network
+    restart: always
+
+networks:
+  rag_network:
+    name: rag_network
+    driver: bridge
