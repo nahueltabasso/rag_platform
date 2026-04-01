@@ -4,7 +4,7 @@ import chromadb
 import os
 
 # Test code to check the contents of the ChromaDB collection after running the spider and pipelines
-COLLECTION_NAME = "wwII_wikipedia"
+COLLECTION_NAME = "site_mercadolibre_faq"
 client = chromadb.PersistentClient(path=os.environ.get("CHROMA_DB_DIR", ""))
 collection = client.get_collection(name=COLLECTION_NAME)
 
