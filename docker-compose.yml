@@ -1,10 +1,9 @@
-version: '3.8'
 services:
   api_ai:
     container_name: api_ai
     build: 
-      context: ./
-      dockerfile: ./api_ai/Dockerfile
+      context: ./api_ai
+      dockerfile: Dockerfile
     env_file: ./api_ai/.env
     ports:
       - "8000:8000"
