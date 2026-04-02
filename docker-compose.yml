@@ -10,6 +10,20 @@ services:
     networks:
       - rag_network
     restart: always
+  
+  crawler:
+    container_name: crawler
+    build: 
+      context: ./crawler
+      dockerfile: Dockerfile
+    env_file: ./crawler/.env
+    volumes:
+      - ./chroma_db:/opt/data/chroma_db
+      - ./errors:/opt/data/errors
+    networks:
+      - rag_network
+    depends_on:
+      - api_ai
 
 networks:
   rag_network:
