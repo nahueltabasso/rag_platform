@@ -1,9 +1,124 @@
+= *CRAWLER*
+:toc:
+:toclevels: 2
 
-Esta variable de entorno es para que scrapy cargue las settings custom
+== *Introduction*
+
+`crawler` is a software component responsible for web crawling and data extraction of the RAG Platform. This component is designed to be flexible and extensible, allowing for the integration of various crawling strategies and data sources. It is built using Scrapy, a powerful web crawling framework in Python, and it work in conjuntion with the link:https://github.com/nahueltabasso/rag_platform/blob/main/api_ai/README.adoc[API_AI] microservice.
+
+== *Features*
+
+* Web crawling and data extraction using Scrapy.
+* Integration with API_AI for text processing tasks (embedding generation and text chunking).
+* Configurable crawling strategies and data sources.
+* Error handling and logging for robust operation.
+* Containerization with Docker for easy deployment.
+* Environment variable configuration for flexible deployment.
+
+== *Technologies Used*
+
+* Python 3.12 recommended
+* Scrapy
+* httpx
+* LangChain
+* LangChain OpenAI
+* ChromaDB
+* Docker
+
+== *Main Structure*
+
+[source]
+----
+crawler/
+├── .env                 # Environment variables for configuration
+├── Dockerfile           # Docker image definition
+├── README.adoc          # This documentation file
+├── requirements.txt     # Service dependencies
+├── run.py               # Python script for running the crawler   
+├── scrapy.cfg           # Scrapy configuration file
+└── src/
+    ├── __init__.py
+    ├── base.py          # Base classes for crawling
+    ├── item.py
+    ├── loader.py
+    ├── main.py
+    ├── middlewares.py
+    ├── pipeline.py      # Data processing pipelines
+    ├── settings.py
+    ├── util.py
+    └── spiders/         # Directory for Scrapy spiders
+        ├── __init__.py
+        ├── base_example_spider.py
+        ├── mercadolibre_faq_spider.py
+        └── ww2_wiki_spider.py
+----
+
+== *Configuration*
+
+To execute the crawler, you need to set the following environment variables in the `.env` file or in your shell environment:
+
+[source,bash]
+----
 export SCRAPY_SETTINGS_MODULE=crawler.src.settings
-
 export EMBEDDING_API_URL=http://localhost:8000/get-embedding
 export CHUNKING_API_URL=http://localhost:8000/split-text
-export CHROMA_DB_DIR=/Users/<your user>/Documents/Python/rag_platform/chroma_db
-export OPENAI_API_KEY=<api>
-export BASE_ERROR_DIR=<>
+export CHROMA_DB_DIR=/rag_platform/chroma_db
+export OPENAI_API_KEY=<your_api_key>
+export BASE_ERROR_DIR=/rag_platform/errors
+----
+
+== *Running without Docker*
+
+=== 1. Enter the service directory
+
+[source,bash]
+----
+cd crawler
+----
+
+=== 2. Create and activate a virtual environment
+
+[source,bash]
+----
+python3.12 -m venv .venv
+source .venv/bin/activate
+----
+
+=== 3. Install dependencies
+
+[source,bash]
+----
+pip install -r requirements.txt
+----
+
+=== 4. Run the basic example spider
+
+[source,bash]
+----
+python run.py --spider base_example_spider
+----
+
+== *Running with Docker*
+
+From the `crawler` directory, build the image:
+
+[source,bash]
+----
+docker build -t rag-platform-crawler .
+----
+
+Then run the container:
+
+[source,bash]
+----
+docker run --env-file ./crawler/.env -v ./chroma_db:/opt/data/chroma_db rag-platform-crawler
+----
+
+== *Notes*
+
+* For local development, Python 3.12 is recommended.
+* Ensure that the API_AI microservice is running and accessible at the specified `EMBEDDING_API_URL` and `CHUNKING_API_URL` for the crawler to function properly.
+
+== *Contact*
+
+Author: *Nahuel Tabasso*
