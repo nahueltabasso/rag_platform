@@ -14,6 +14,24 @@
 * Error handling and logging for robust operation.
 * Containerization with Docker for easy deployment.
 * Environment variable configuration for flexible deployment.
+* Each site has its own spider, which can be executed independently or as part of a larger crawling workflow. This allows to each spider navigate the specific structure of the target website and extract relevant information.
+
+[cols="1,1,1", options="header"]
+|===
+| Site | Spider | DB Collection
+
+| MercadoLibre FAQs
+| mercadolibre_faq_spider
+| site_mercadolibre_faq
+
+| WWII Wikipedia
+| wwii_wikipedia_spider
+| site_wwII_wikipedia
+
+| Quote to Scrape
+| base_example_spider
+| site_base_example
+|===
 
 == *Technologies Used*
 
