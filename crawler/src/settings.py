@@ -2,6 +2,9 @@ import os
 
 VERSION = '1.O.O'
 BOT_NAME = 'scrapy_crawlers'
+
+SPIDER_MODULES = ["crawler.src.spiders"]
+
 # Obey robots.txt rules
 ROBOTSTXT_OBEY = True
 
