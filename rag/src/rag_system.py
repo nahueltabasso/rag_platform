@@ -1,3 +1,5 @@
+from typing import Dict
+
 from langchain_chroma import Chroma
 from langchain_openai import OpenAIEmbeddings, ChatOpenAI
 from langchain_core.prompts import PromptTemplate
@@ -5,42 +7,45 @@ from langchain_core.runnables import RunnablePassthrough
 from langchain_core.output_parsers import StrOutputParser
 from langchain_classic.retrievers.multi_query import MultiQueryRetriever
 from langchain_classic.retrievers.ensemble import EnsembleRetriever 
+import os
 from config import *
 from rag.src.prompts import MULTI_QUERY_PROMPT, SYSTEM_PROMPT
 import streamlit as st
 
 # @st.cache_resource
-def initialize_rag_system():
+def initialize_rag_system(config: Dict):
     
     # Initialize the Chroma vector store
     vector_store = Chroma(
-        collection_name='site_wwII_wikipedia',
-        embedding_function=OpenAIEmbeddings(model="text-embedding-3-large"),
-        persist_directory=CHROMA_DB_PATH
+        collection_name=config.get('vector_db', {}).get('collection_name'),
+        embedding_function=OpenAIEmbeddings(model=config.get('vector_db', {}).get('embbedings_model')),
+        persist_directory=os.getenv("CHROMA_DB_PATH", "./chroma_db")
     )
     
     # Load model
-    llm_query = ChatOpenAI(model=QUERY_MODEL, temperature=0.0)
-    llm_generation = ChatOpenAI(model=GENERATION_MODEL, temperature=0.0)
+    llm_query = ChatOpenAI(model=config.get('models', {}).get('query_model'), temperature=0.0)
+    llm_generation = ChatOpenAI(model=config.get('models', {}).get('generation_model'), temperature=0.0)
     
     # Retriever MMR (Maximal Marginal Relevance) 
     base_retriever = vector_store.as_retriever(
-        search_type=SEARCH_TYPE,
+        search_type=config.get('mmr', {}).get('search_type'),
         search_kwargs={
-            "k": SEARCH_K,
-            "lambda_mult": MMR_DIVERSITY_LAMBDA,
-            "fetch_k": MMR_FETCH_K,
+            "k": config.get('mmr', {}).get('search_k'),
+            "lambda_mult": config.get('mmr', {}).get('mmr_diversity_lambda'),
+            "fetch_k": config.get('mmr', {}).get('mmr_fetch_k'),
         }
     )
     
     # Retriever with cosine similarity
     similarity_retriever = vector_store.as_retriever(
         search_type="similarity",
-        search_kwargs={"k": SEARCH_K}
+        search_kwargs={"k": config.get('hybrid_search', {}).get('search_k')}
     )
     
     # Custom prompt for MultiQueryRetriever
-    multi_query_prompt = PromptTemplate.from_template(MULTI_QUERY_PROMPT)
+    multi_query_prompt = PromptTemplate.from_template(
+        config.get('prompts', {}).get('multi_query_prompt')
+    )
     
     # MultiQueryRetriever with MMR
     mmr_retriever = MultiQueryRetriever.from_llm(
@@ -50,8 +55,7 @@ def initialize_rag_system():
     )
     
     # EnsembleRetriever to combine MMR and similarity retrievers
-    if ENABLE_HYBRID_SEARCH:
-        print("Entra aca")
+    if config.get('hybrid_search', {}).get('enable', False):
         retriever = EnsembleRetriever(
             retrievers=[mmr_retriever, similarity_retriever],
             weights=[0.7, 0.3]
@@ -59,7 +63,7 @@ def initialize_rag_system():
     else:
         retriever = mmr_retriever  # Solo MMR
         
-    prompt = PromptTemplate.from_template(SYSTEM_PROMPT)
+    prompt = PromptTemplate.from_template(config.get('prompts', {}).get('system_prompt'))
     
     rag_chain = (
         {
@@ -84,13 +88,36 @@ def format_documents(documents):
     print("END FORMAT DOCUMENTS ----")
     return "\n\n".join(formatted)
 
-def process_query(query: str):
+def build_relevance_chain(config: Dict, llm_query: ChatOpenAI):
+    relevance_prompt = PromptTemplate.from_template(
+        config.get('prompts', {}).get('relevance_prompt')
+    )
+    return relevance_prompt | llm_query | StrOutputParser()
+
+def build_context(query: str, retriever, relevance_chain) -> str:
+    docs = retriever.invoke(query)
+    relevante_docs = ""
+    return ""
+    
+def filter_relevant_documents(documents, query: str, relevance_chain):
+    filtered = []
+
+    for doc in documents:
+        result = relevance_chain.invoke({
+            "chunk": doc.page_content,
+            "query": query
+        })
+
+        if result.strip().upper().startswith("SI"):
+            filtered.append(doc)
+
+    return filtered    
+    
+def process_query(config: Dict, query: str):
     try:
-        rag_chain, retriever = initialize_rag_system()
-        
+        rag_chain, retriever = initialize_rag_system(config)
         # Obtain response
         response = rag_chain.invoke(query)
-        
         # Obtain relevant documents
         docs = retriever.invoke(query)
         
