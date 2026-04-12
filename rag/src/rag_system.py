@@ -4,6 +4,7 @@ from langchain_core.prompts import PromptTemplate
 from langchain_core.runnables import RunnablePassthrough
 from langchain_core.output_parsers import StrOutputParser
 from langchain_classic.retrievers.multi_query import MultiQueryRetriever
+from langchain_classic.retrievers.ensemble import EnsembleRetriever 
 from config import *
 from rag.src.prompts import MULTI_QUERY_PROMPT, SYSTEM_PROMPT
 import streamlit as st
@@ -32,16 +33,32 @@ def initialize_rag_system():
         }
     )
     
+    # Retriever with cosine similarity
+    similarity_retriever = vector_store.as_retriever(
+        search_type="similarity",
+        search_kwargs={"k": SEARCH_K}
+    )
+    
     # Custom prompt for MultiQueryRetriever
     multi_query_prompt = PromptTemplate.from_template(MULTI_QUERY_PROMPT)
     
     # MultiQueryRetriever with MMR
-    retriever = MultiQueryRetriever.from_llm(
+    mmr_retriever = MultiQueryRetriever.from_llm(
         retriever=base_retriever,
         llm=llm_query,
         prompt=multi_query_prompt
     )
     
+    # EnsembleRetriever to combine MMR and similarity retrievers
+    if ENABLE_HYBRID_SEARCH:
+        print("Entra aca")
+        retriever = EnsembleRetriever(
+            retrievers=[mmr_retriever, similarity_retriever],
+            weights=[0.7, 0.3]
+        )
+    else:
+        retriever = mmr_retriever  # Solo MMR
+        
     prompt = PromptTemplate.from_template(SYSTEM_PROMPT)
     
     rag_chain = (
