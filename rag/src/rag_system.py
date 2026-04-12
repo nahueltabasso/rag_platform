@@ -9,10 +9,9 @@ from langchain_classic.retrievers.multi_query import MultiQueryRetriever
 from langchain_classic.retrievers.ensemble import EnsembleRetriever 
 import os
 from config import *
-from rag.src.prompts import MULTI_QUERY_PROMPT, SYSTEM_PROMPT
 import streamlit as st
 
-# @st.cache_resource
+@st.cache_resource
 def initialize_rag_system(config: Dict):
     
     # Initialize the Chroma vector store
@@ -63,12 +62,15 @@ def initialize_rag_system(config: Dict):
     else:
         retriever = mmr_retriever  # Solo MMR
         
+    # System prompt
     prompt = PromptTemplate.from_template(config.get('prompts', {}).get('system_prompt'))
     
+    # Relevance chain to filter documents before generation
+    relevance_chain = build_relevance_chain(config=config, llm_query=llm_query)
     rag_chain = (
         {
-            "context": retriever | format_documents,
-            "query": RunnablePassthrough()
+            "query": RunnablePassthrough(),
+            "context": lambda query: build_context(query=query, retriever=retriever, relevance_chain=relevance_chain),
         } 
         | prompt 
         | llm_generation 
@@ -96,8 +98,10 @@ def build_relevance_chain(config: Dict, llm_query: ChatOpenAI):
 
 def build_context(query: str, retriever, relevance_chain) -> str:
     docs = retriever.invoke(query)
-    relevante_docs = ""
-    return ""
+    relevante_docs = filter_relevant_documents(documents=docs,
+                                               query=query,
+                                               relevance_chain=relevance_chain)
+    return format_documents(relevante_docs)
     
 def filter_relevant_documents(documents, query: str, relevance_chain):
     filtered = []
@@ -110,7 +114,6 @@ def filter_relevant_documents(documents, query: str, relevance_chain):
 
         if result.strip().upper().startswith("SI"):
             filtered.append(doc)
-
     return filtered    
     
 def process_query(config: Dict, query: str):
