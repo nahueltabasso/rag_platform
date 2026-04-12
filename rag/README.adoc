@@ -1,0 +1,1 @@
+export CHROMA_DB_PATH=/Users/nahueltabasso/Documents/Python/rag_platform/chroma_db

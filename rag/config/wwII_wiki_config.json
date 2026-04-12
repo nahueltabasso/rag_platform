@@ -1,0 +1,36 @@
+{
+    "name": "Sistema RAG - 🪖 Segunda Guerra Mundial",
+    "topic": "Segunda Guerra Mundial",
+    "page_icon": "🪖",
+    "initial_message": "Hola soy un Asistente especializado en la Segunda Guerra Mundial, En que puedo ayudarte?",
+    "input_field_leyend": "Escribe tu pregunta sobre la Segunda Guerra Mundial aquí...",
+    "footer_message": "🪖 Asistente RAG con MMR",
+    "vector_db": {
+        "type": "ChromaDB",
+        "collection_name": "site_wwII_wikipedia",
+        "embbedings_model": "text-embedding-3-large",
+        "chunk_size": 4000,
+        "chunk_overlap": 800
+    },
+    "models": {
+        "provider": "OpenAI",
+        "query_model": "gpt-4o-mini",
+        "generation_model": "gpt-4o"
+    },
+    "mmr": {
+        "search_type": "mmr",
+        "mmr_diversity_lambda": 0.7,
+        "mmr_fetch_k": 20,
+        "search_k": 5
+    },
+    "hybrid_search": {
+        "enable": true,
+        "similarity_threshold": 0.75,
+        "search_k": 5
+    },
+    "prompts": {
+        "system_prompt": " Eres un asistente especializado en la Segunda Guerra Mundial.\n\nTu conocimiento proviene EXCLUSIVAMENTE del contexto proporcionado a continuación. NO podés usar información externa ni conocimiento previo.\n \nREGLAS OBLIGATORIAS:\n- Responde UNICAMENTE usando la informacion del contexto proporcionado.\n- No inventes datos, fechas, nombres ni explicaciones.\n- No completes con conocimiento general.\n- Si la respuesta no está en el contexto, respondé exactamente: \"No tengo información suficiente para responder esa pregunta.\"\n\nINSTRUCCIONES DE RESPUESTA:\n- Usá solo la información relevante del contexto.\n- Si hay múltiples fragmentos útiles, combinarlos de forma coherente.\n- Respondé de manera clara, precisa y ordenada.\n- Usá párrafos o listas si mejora la claridad.\n- No repitas innecesariamente el contexto.\n\nCONTEXTO:\n{context}\n\nPREGUNTA:\n{query}\n\nRESPUESTA:\n",
+        "multi_query_prompt": " Eres un experto en recuperacion de informacion sobre la Segunda Guerra Mundial.\n\nGenera 3 consultas alternativas para buscar documentos relacionados con la pregunta del usuario.\n\nInstrucciones:\n- conserva el significado original\n- usa distintas formas de expresar la misma intencion\n- incluye nombres, eventos, lugares o periodos si ayudan\n- evita respuestas; solo genera consultas\n- escribe una consulta por linea\n- no numeres ni uses guiones ni viñetas\n\nPregunta original: {question}\n",
+        "relevance_prompt": "Analiza si el siguiente fragmento de texto es relevante para responder la consulta del usuario.\n\nFRAGMENTO: {chunk}\n\nCONSULTA: {query}\n\n¿Es este fragmento relevante para la consulta? Responde solo con \"SI\" o \"NO\" y una breve justificacion.\n"
+    }
+}

@@ -7,142 +7,154 @@ from langchain_core.runnables import RunnablePassthrough
 from langchain_core.output_parsers import StrOutputParser
 from langchain_classic.retrievers.multi_query import MultiQueryRetriever
 from langchain_classic.retrievers.ensemble import EnsembleRetriever 
-import os
+from utils import format_documents
 from config import *
+import os
+import json
 import streamlit as st
 
-@st.cache_resource
-def initialize_rag_system(config: Dict):
+class RAGService:
     
-    # Initialize the Chroma vector store
-    vector_store = Chroma(
-        collection_name=config.get('vector_db', {}).get('collection_name'),
-        embedding_function=OpenAIEmbeddings(model=config.get('vector_db', {}).get('embbedings_model')),
-        persist_directory=os.getenv("CHROMA_DB_PATH", "./chroma_db")
-    )
+    _instance = None
     
-    # Load model
-    llm_query = ChatOpenAI(model=config.get('models', {}).get('query_model'), temperature=0.0)
-    llm_generation = ChatOpenAI(model=config.get('models', {}).get('generation_model'), temperature=0.0)
-    
-    # Retriever MMR (Maximal Marginal Relevance) 
-    base_retriever = vector_store.as_retriever(
-        search_type=config.get('mmr', {}).get('search_type'),
-        search_kwargs={
-            "k": config.get('mmr', {}).get('search_k'),
-            "lambda_mult": config.get('mmr', {}).get('mmr_diversity_lambda'),
-            "fetch_k": config.get('mmr', {}).get('mmr_fetch_k'),
-        }
-    )
-    
-    # Retriever with cosine similarity
-    similarity_retriever = vector_store.as_retriever(
-        search_type="similarity",
-        search_kwargs={"k": config.get('hybrid_search', {}).get('search_k')}
-    )
-    
-    # Custom prompt for MultiQueryRetriever
-    multi_query_prompt = PromptTemplate.from_template(
-        config.get('prompts', {}).get('multi_query_prompt')
-    )
-    
-    # MultiQueryRetriever with MMR
-    mmr_retriever = MultiQueryRetriever.from_llm(
-        retriever=base_retriever,
-        llm=llm_query,
-        prompt=multi_query_prompt
-    )
-    
-    # EnsembleRetriever to combine MMR and similarity retrievers
-    if config.get('hybrid_search', {}).get('enable', False):
-        retriever = EnsembleRetriever(
-            retrievers=[mmr_retriever, similarity_retriever],
-            weights=[0.7, 0.3]
+    def __new__(cls, *args, **kwargs):
+        if cls._instance is None:
+            cls._instance = super(RAGService, cls).__new__(cls)
+        return cls._instance
+
+    def __init__(self, config_path: str) -> None:
+        if not os.path.exists(config_path):
+            raise Exception(f"Config file not found: {config_path}")
+        with open(config_path, 'r') as f:
+            self.config = json.load(f)
+        
+        self.vector_store = None
+        self.llm_query = None
+        self.llm_generation = None
+        self.retriever = None
+        self.rag_chain = None
+        self.documents = []
+        
+        self._init_rag_system()
+        
+    def set_config(self, config_path: str) -> None:
+        if not os.path.exists(config_path):
+            raise Exception(f"Config file not found: {config_path}")
+        with open(config_path, 'r') as f:
+            self.config = json.load(f)
+        self._init_rag_system()
+        
+    def _init_rag_system(self) -> None:
+        # Initialize the Chroma Vector Store
+        self.vector_store = Chroma(
+            collection_name=self.config.get('vector_db', {}).get('collection_name'),
+            embedding_function=OpenAIEmbeddings(model=self.config.get('vector_db', {}).get('embbedings_model')),
+            persist_directory=os.getenv("CHROMA_DB_PATH", "./chroma_db")
         )
-    else:
-        retriever = mmr_retriever  # Solo MMR
         
-    # System prompt
-    prompt = PromptTemplate.from_template(config.get('prompts', {}).get('system_prompt'))
-    
-    # Relevance chain to filter documents before generation
-    relevance_chain = build_relevance_chain(config=config, llm_query=llm_query)
-    rag_chain = (
-        {
-            "query": RunnablePassthrough(),
-            "context": lambda query: build_context(query=query, retriever=retriever, relevance_chain=relevance_chain),
-        } 
-        | prompt 
-        | llm_generation 
-        | StrOutputParser()
-    )
-    
-    return rag_chain, retriever
+        # Load model
+        self.llm_query = ChatOpenAI(model=self.config.get('models', {}).get('query_model'), temperature=0.0)
+        self.llm_generation = ChatOpenAI(model=self.config.get('models', {}).get('generation_model'), temperature=0.0)
 
-def format_documents(documents):
-    print("INIT FORMAT DOCUMENTS ----")
-    formatted = []
-    for i, doc in enumerate(documents):
-        formatted.append(f"Fragmento {i+1}:\n{doc.metadata}\n{doc.page_content}\n")
-    
-    for f in formatted:
-        print(f"Formatted document:\n{f}\n{'-'*50}")
-    print("END FORMAT DOCUMENTS ----")
-    return "\n\n".join(formatted)
-
-def build_relevance_chain(config: Dict, llm_query: ChatOpenAI):
-    relevance_prompt = PromptTemplate.from_template(
-        config.get('prompts', {}).get('relevance_prompt')
-    )
-    return relevance_prompt | llm_query | StrOutputParser()
-
-def build_context(query: str, retriever, relevance_chain) -> str:
-    docs = retriever.invoke(query)
-    relevante_docs = filter_relevant_documents(documents=docs,
-                                               query=query,
-                                               relevance_chain=relevance_chain)
-    return format_documents(relevante_docs)
-    
-def filter_relevant_documents(documents, query: str, relevance_chain):
-    filtered = []
-
-    for doc in documents:
-        result = relevance_chain.invoke({
-            "chunk": doc.page_content,
-            "query": query
-        })
-
-        if result.strip().upper().startswith("SI"):
-            filtered.append(doc)
-    return filtered    
-    
-def process_query(config: Dict, query: str):
-    try:
-        rag_chain, retriever = initialize_rag_system(config)
-        # Obtain response
-        response = rag_chain.invoke(query)
-        # Obtain relevant documents
-        docs = retriever.invoke(query)
-        
-        # Format documents for display
-        docs_info = []
-        for i, doc in enumerate(docs[:SEARCH_K], 1):
-            doc_info = {
-                "chunk": i,
-                "content": doc.page_content[:1000] + "..." if len(doc.page_content) > 1000 else doc.page_content,
-                "url": doc.metadata.get("source", 'N/A')
+        # Retriever MMR (Maximal Marginal Relevance) 
+        base_retriever = self.vector_store.as_retriever(
+            search_type=self.config.get('mmr', {}).get('search_type'),
+            search_kwargs={
+                "k": self.config.get('mmr', {}).get('search_k'),
+                "lambda_mult": self.config.get('mmr', {}).get('mmr_diversity_lambda'),
+                "fetch_k": self.config.get('mmr', {}).get('mmr_fetch_k'),
             }
-            docs_info.append(doc_info)
-        return response, docs_info
-    except Exception as e:
-        error_msg = f"Error al procesar la consulta: {str(e)}"
-        return error_msg, []
+        )
+        
+        # Retriever with cosine similarity
+        similarity_retriever = self.vector_store.as_retriever(
+            search_type="similarity",
+            search_kwargs={"k": self.config.get('hybrid_search', {}).get('search_k')}
+        )
+
+        # Custom prompt for MultiQueryRetriever
+        multi_query_prompt = PromptTemplate.from_template(
+            self.config.get('prompts', {}).get('multi_query_prompt')
+        )
+        
+        # MultiQueryRetriever with MMR
+        mmr_retriever = MultiQueryRetriever.from_llm(
+            retriever=base_retriever,
+            llm=self.llm_query,
+            prompt=multi_query_prompt
+        )
     
-def get_retriever_info():
-    return {
-        "tipo": f"{SEARCH_TYPE.upper()} + Multiquery",
-        "documentos": SEARCH_K,
-        "diversidad": MMR_DIVERSITY_LAMBDA,
-        "candidatos": MMR_FETCH_K,
-        "umbral": 'N/A'
-    }
+        # EnsembleRetriever to combine MMR and similarity retrievers
+        if self.config.get('hybrid_search', {}).get('enable', False):
+            self.retriever = EnsembleRetriever(
+                retrievers=[mmr_retriever, similarity_retriever],
+                weights=[0.7, 0.3]
+            )
+        else:
+            self.retriever = mmr_retriever  # Solo MMR
+
+        # System prompt
+        prompt = PromptTemplate.from_template(self.config.get('prompts', {}).get('system_prompt'))
+    
+        # Relevance chain to filter documents before generation
+        relevance_chain = self._build_relevance_chain()
+
+        self.rag_chain = (
+            {
+                "query": RunnablePassthrough(),
+                "context": lambda query: self._build_context(query=query, relevance_chain=relevance_chain),
+            } 
+            | prompt 
+            | self.llm_generation 
+            | StrOutputParser()
+        )
+
+    def process_query(self, query: str):
+        try:
+            # Obtain response
+            response = self.rag_chain.invoke(query) # type: ignore
+            # Obtain relevant documents
+            docs = self.documents
+            # Format documents for display
+            docs_info = []
+            for i, doc in enumerate(docs[:self.config.get('hybrid_search', {}).get('search_k', 5)], 1):
+                doc_info = {
+                    "chunk": i,
+                    "content": doc.page_content[:1000] + "..." if len(doc.page_content) > 1000 else doc.page_content,
+                    "url": doc.metadata.get("source", 'N/A')
+                }
+                docs_info.append(doc_info)
+            return response, docs_info
+        except Exception as e:
+            error_msg = f"Error al procesar la consulta: {str(e)}"
+            return error_msg, []
+
+    def _build_relevance_chain(self):
+        relevance_prompt = PromptTemplate.from_template(
+            self.config.get('prompts', {}).get('relevance_prompt')
+        )
+        return relevance_prompt | self.llm_query | StrOutputParser() # type: ignore
+    
+    def _build_context(self, query: str, relevance_chain) -> str:
+        docs = self.retriever.invoke(query) # type: ignore
+        relevante_docs = self._filter_relevant_documents(docs=docs,
+                                                         query=query,
+                                                         relevance_chain=relevance_chain)
+        return format_documents(relevante_docs)
+    
+    def _filter_relevant_documents(self, docs, query: str, relevance_chain):
+        filtered_docs = []
+        for doc in docs:
+            result = relevance_chain.invoke({
+                "chunk": doc.page_content,
+                "query": query
+            })
+
+            if result.strip().upper().startswith("SI"):
+                filtered_docs.append(doc)
+        self.documents = filtered_docs
+        return filtered_docs
+
+def get_rag_service(config_path: str) -> RAGService:
+    return RAGService(config_path=config_path) # type: ignore
+    
