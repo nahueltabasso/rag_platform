@@ -1,5 +1,3 @@
-from typing import Dict
-
 from langchain_chroma import Chroma
 from langchain_openai import OpenAIEmbeddings, ChatOpenAI
 from langchain_core.prompts import PromptTemplate
@@ -8,14 +6,13 @@ from langchain_core.output_parsers import StrOutputParser
 from langchain_classic.retrievers.multi_query import MultiQueryRetriever
 from langchain_classic.retrievers.ensemble import EnsembleRetriever 
 from utils import format_documents
-from config import *
 import os
 import json
-import streamlit as st
 
 class RAGService:
     
     _instance = None
+    _initialized = False
     
     def __new__(cls, *args, **kwargs):
         if cls._instance is None:
@@ -23,10 +20,17 @@ class RAGService:
         return cls._instance
 
     def __init__(self, config_path: str) -> None:
+        config_path = str(os.path.abspath(config_path))
+        if self.__class__._initialized:
+            if getattr(self, "config_path", None) != config_path:
+                self.set_config(config_path)
+            return
+
         if not os.path.exists(config_path):
             raise Exception(f"Config file not found: {config_path}")
         with open(config_path, 'r') as f:
             self.config = json.load(f)
+        self.config_path = config_path
         
         self.vector_store = None
         self.llm_query = None
@@ -36,12 +40,19 @@ class RAGService:
         self.documents = []
         
         self._init_rag_system()
+        self.__class__._initialized = True
         
     def set_config(self, config_path: str) -> None:
+        config_path = str(os.path.abspath(config_path))
+        if getattr(self, "config_path", None) == config_path:
+            return
+
         if not os.path.exists(config_path):
             raise Exception(f"Config file not found: {config_path}")
         with open(config_path, 'r') as f:
             self.config = json.load(f)
+        self.config_path = config_path
+        self.documents = []
         self._init_rag_system()
         
     def _init_rag_system(self) -> None:

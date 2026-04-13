@@ -1,22 +1,39 @@
+from typing import List
+from pathlib import Path
 from rag_system import get_rag_service
 import streamlit as st
 import argparse
 import json
+import os
+
+
+def get_config_files() -> List[str]:
+    config_dir = Path(__file__).resolve().parent.parent / "config"
+    return [str(path) for path in config_dir.iterdir() if path.is_file()]
 
 def main(config_path: str):
-    with open(config_path, 'r') as f:
+    current_config_path = str(Path(config_path).resolve())
+    config_files = get_config_files()
+
+    if "selected_config_path" not in st.session_state:
+        st.session_state.selected_config_path = current_config_path
+
+    current_config_path = st.session_state.selected_config_path
+
+    with open(current_config_path, 'r') as f:
         config = json.load(f)
+
+    rag_service = get_rag_service(config_path=current_config_path)
     
     # Page Set-Up
     st.set_page_config(
-        # page_title="Sistema RAG - Asistente Segunda Guerra Mundial",
         page_title=config.get("name", "Sistema RAG"),
         page_icon=config.get("page_icon"),
         layout="wide"
     )
 
     # Títle
-    st.title(config.get("name", "Sistema RAG - Asistente Segunda Guerra Mundial"))
+    st.title(config.get("name", "Sistema RAG"))
     st.divider()
 
     # Init chat history
@@ -29,28 +46,37 @@ def main(config_path: str):
         ]
     # Sidebar
     with st.sidebar:
-        st.header("📋 Información del Sistema")
+        selected_file = st.selectbox(
+            "📁 Archivo de configuración",
+            options=config_files,
+            index=next(
+                (
+                    i for i, path in enumerate(config_files)
+                    if str(Path(path).resolve()) == st.session_state.selected_config_path
+                ),
+                0
+            ),
+            format_func=lambda path: Path(path).name,
+        )
 
-        # selected_file = st.selectbox(
-        #     "📁 Archivo de configuración",
-        #     options=config_files,
-        #     index=next(
-        #         (i for i, path in enumerate(config_files) if str(path.resolve()) == current_config_path),
-        #         0
-        #     ),
-        #     format_func=lambda path: path.name,
-        # )
+        selected_file_path = str(Path(selected_file).resolve())
 
-        # selected_file_path = str(selected_file.resolve())
-        # if selected_file_path != current_config_path:
-        #     st.session_state.selected_config_path = selected_file_path
-        #     if "messages" in st.session_state:
-        #         del st.session_state["messages"]
-        #     st.rerun()
+        if selected_file_path != st.session_state.selected_config_path:
+            rag_service.set_config(selected_file_path)
+            st.session_state.selected_config_path = selected_file_path
+
+            with open(selected_file_path, 'r') as f:
+                new_config = json.load(f)
+
+            st.session_state.messages = [
+                {
+                    "role": "assistant",
+                    "content": new_config.get("initial_message", "Hola, ¿en qué puedo ayudarte?")
+                }
+            ]
+            st.rerun()
         
         # Información del retriever
-        rag_service = get_rag_service(config_path=config_path)
-        
         st.markdown("**🔍 Retriever:**")
         st.info(f"Tema: {config.get('topic', 'N/A')}")
         retriever_info = "MMR + Multiquery Hybrid" if config.get('hybrid_search', {}).get('enable') else "MMR"

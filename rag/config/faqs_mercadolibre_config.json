@@ -1,16 +1,16 @@
 {
-    "name": "Sistema RAG - 🪖 FAQs Mercado Libre",
+    "name": "Sistema RAG - 🏬 FAQs Mercado Libre",
     "topic": "FAQs Mercado Libre",
-    "page_icon": "🪖",
+    "page_icon": "🏬",
     "initial_message": "Hola soy un Asistente especializado en FAQs de Mercado Libre, En que puedo ayudarte?",
-    "input_field_leyend": "Escribe tu pregunta sobre Mercado Libre aquí...",
-    "footer_message": "🪖 Asistente RAG con MMR",
+    "input_field_leyend": "Escribe tu pregunta sobre los FAQs de MercadoLibre",
+    "footer_message": "🏬 Asistente RAG con MMR",
     "vector_db": {
         "type": "ChromaDB",
-        "collection_name": "site_faqs_mercadolibre",
+        "collection_name": "site_mercadolibre_faq",
         "embbedings_model": "text-embedding-3-large",
-        "chunk_size": 4000,
-        "chunk_overlap": 800
+        "chunk_size": 1200,
+        "chunk_overlap": 200
     },
     "models": {
         "provider": "OpenAI",
@@ -25,8 +25,7 @@
     },
     "hybrid_search": {
         "enable": true,
-        "similarity_threshold": 0.75,
-        "search_k": 5
+        "similarity_threshold": 0.75
     },
     "prompts": {
         "system_prompt": " Eres un asistente especializado en la Segunda Guerra Mundial.\n\nTu conocimiento proviene EXCLUSIVAMENTE del contexto proporcionado a continuación. NO podés usar información externa ni conocimiento previo.\n \nREGLAS OBLIGATORIAS:\n- Responde UNICAMENTE usando la informacion del contexto proporcionado.\n- No inventes datos, fechas, nombres ni explicaciones.\n- No completes con conocimiento general.\n- Si la respuesta no está en el contexto, respondé exactamente: \"No tengo información suficiente para responder esa pregunta.\"\n\nINSTRUCCIONES DE RESPUESTA:\n- Usá solo la información relevante del contexto.\n- Si hay múltiples fragmentos útiles, combinarlos de forma coherente.\n- Respondé de manera clara, precisa y ordenada.\n- Usá párrafos o listas si mejora la claridad.\n- No repitas innecesariamente el contexto.\n\nCONTEXTO:\n{context}\n\nPREGUNTA:\n{query}\n\nRESPUESTA:\n",
