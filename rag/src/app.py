@@ -152,5 +152,8 @@ if __name__ == "__main__":
 
     args = get_args()
     config_path = args.config_path
+    
+    if not config_path:
+        config_path = "./config/wwII_wiki_config.json"
 
     main(config_path=config_path)
