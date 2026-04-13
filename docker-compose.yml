@@ -25,16 +25,18 @@ services:
     depends_on:
       - api_ai
 
-    rag:
-      container_name: rag_component
-      build:
-        context: ./rag
-        dockerfile: Dockerfile
-      env_file: ./rag/.env
-      networks:
-        - rag_network
-      depends_on:
-        - api_ai
+  rag:
+    container_name: rag_component
+    build:
+      context: ./rag
+      dockerfile: Dockerfile
+    env_file: ./rag/.env
+    ports:
+      - "8501:8501"
+    networks:
+      - rag_network
+    depends_on:
+      - api_ai
 
 networks:
   rag_network:
