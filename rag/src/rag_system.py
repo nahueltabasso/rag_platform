@@ -9,6 +9,15 @@ from utils import format_documents
 import os
 import json
 
+import logging
+
+logging.basicConfig(
+    level=logging.INFO,
+    format="%(asctime)s | %(levelname)s | %(name)s | %(message)s"
+)
+
+logger = logging.getLogger(__name__)
+
 class RAGService:
     
     _instance = None
@@ -43,6 +52,15 @@ class RAGService:
         self.__class__._initialized = True
         
     def set_config(self, config_path: str) -> None:
+        """Set RAG system configuration
+
+        Args:
+            config_path (str): Path to the configuration file.
+
+        Raises:
+            Exception: If the configuration file is not found.
+        """
+        logger.info(f"Setting new configuration for RAG system: {config_path}")
         config_path = str(os.path.abspath(config_path))
         if getattr(self, "config_path", None) == config_path:
             return
@@ -56,16 +74,20 @@ class RAGService:
         self._init_rag_system()
         
     def _init_rag_system(self) -> None:
+        """Initialize the RAG system components based on the current configuration."""
+        
         # Initialize the Chroma Vector Store
         self.vector_store = Chroma(
             collection_name=self.config.get('vector_db', {}).get('collection_name'),
             embedding_function=OpenAIEmbeddings(model=self.config.get('vector_db', {}).get('embbedings_model')),
             persist_directory=os.getenv("CHROMA_DB_PATH", "./chroma_db")
         )
+        logger.info("Chroma vector store initialized successfully.")
         
         # Load model
         self.llm_query = ChatOpenAI(model=self.config.get('models', {}).get('query_model'), temperature=0.0)
         self.llm_generation = ChatOpenAI(model=self.config.get('models', {}).get('generation_model'), temperature=0.0)
+        logger.info("LLM models loaded successfully")
 
         # Retriever MMR (Maximal Marginal Relevance) 
         base_retriever = self.vector_store.as_retriever(
@@ -97,13 +119,14 @@ class RAGService:
     
         # EnsembleRetriever to combine MMR and similarity retrievers
         if self.config.get('hybrid_search', {}).get('enable', False):
+            logger.info("Initializing EnsembleRetriever for hybrid search")
             self.retriever = EnsembleRetriever(
                 retrievers=[mmr_retriever, similarity_retriever],
                 weights=[0.7, 0.3]
             )
         else:
+            logger.info("Initializing MMR Retriever without hybrid search")
             self.retriever = mmr_retriever  # Solo MMR
-
         # System prompt
         prompt = PromptTemplate.from_template(self.config.get('prompts', {}).get('system_prompt'))
     
@@ -121,6 +144,15 @@ class RAGService:
         )
 
     def process_query(self, query: str):
+        """Process a user query through the RAG system and return the response along with relevant documents.
+        
+        Args:            
+            query (str): The user query to process.
+            
+        Returns:
+            tuple: A tuple containing the response string and a list of relevant documents information.
+        """
+        logger.info(f"Processing query: {query}")
         try:
             # Obtain response
             response = self.rag_chain.invoke(query) # type: ignore
@@ -154,6 +186,7 @@ class RAGService:
         return format_documents(relevante_docs)
     
     def _filter_relevant_documents(self, docs, query: str, relevance_chain):
+        logger.info(f"Filtering {len(docs)} documents for relevance to the query.")
         filtered_docs = []
         for doc in docs:
             result = relevance_chain.invoke({
@@ -163,6 +196,7 @@ class RAGService:
 
             if result.strip().upper().startswith("SI"):
                 filtered_docs.append(doc)
+        logger.info(f"{len(filtered_docs)} documents deemed relevant after filtering.")
         self.documents = filtered_docs
         return filtered_docs
 
