@@ -1,1 +1,115 @@
-export CHROMA_DB_PATH=/Users/nahueltabasso/Documents/Python/rag_platform/chroma_db
+= **RAG Platform**
+:toc:
+:toclevels: 2
+
+== *Introduction*
+
+`RAG Platform` is the last component of this project, and it is responsible for providing a question-answering service based
+on the data collected by the `crawler` component. It is designed to be flexible and extensible, allowing for the integration of various question-answering srategies. 
+
+This software component is built using Python, LangChain Framework and ChromaDB as the vector Database. It was developed to use a JSON-formatted configuration file, making it generic for any type of question/answer on any topic.
+
+* Onboarding process
+* Question-answering strategies
+* Queries about political documents
+
+At this moment, the system has two examples 
+
+* World War II Assistant
+* MercadoLibre FAQs Asistant
+
+Currently, it is configure to use the `rag_chain`, which retrieves relevant documents from the vector database and uses them to generate answers to user queries.
+
+It is provides a simple graphic interface built with *streamlit* to interact with the system and test its capabilities.
+
+== *Features*
+
+* Question-answering service based on retrieved documents.
+* Integration with ChromaDB for vector storage and retrieval.
+* Configurable question-answering strategies.
+* Error handling and logging for robust operation.
+* Containerization with Docker for easy deployment.
+* Environment variable configuration for flexible deployment.
+
+== *Technologies Used*
+
+* Python 3.12 recommended
+* LangChain
+* LangChain OpenAI
+* ChromaDB
+* Docker
+
+== *Configuration*
+
+To execute the crawler, you need to set the following environment variables in the `.env` file or in your shell environment:
+
+[source,bash]
+----
+OPENAI_API_KEY=<your_openai_api_key>
+CHROMA_DB_PATH=<your_chroma_db_path>
+----
+
+== *Running without Docker*
+
+=== 1. Enter the service directory
+
+[source,bash]
+----
+cd rag
+----
+
+=== 2. Create and activate a virtual environment
+
+[source,bash]
+----
+python3.12 -m venv .venv
+source .venv/bin/activate
+----
+
+=== 3. Install dependencies
+
+[source,bash]
+----
+pip install -r requirements.txt
+----
+
+=== 4. Run
+
+[source,bash]
+----
+streamlit run src/app.py -- --config_path <path_to_your_config_file>
+----
+
+== *Running with Docker*
+
+From the `rag` directory, build the image:
+
+[source,bash]
+----
+docker build -t rag-platform-rag .
+----
+
+Then run the container:
+
+[source,bash]
+----
+docker run --env-file ./rag/.env -v ./chroma_db:/opt/data/chroma_db rag-platform-rag
+----
+
+== *Notes*
+
+* For local development, Python 3.12 is recommended.
+
+== *Futures Features*
+
+* Develop a API Rest service to interact with the system without using the graphic interface.
+* Implement memory management to maintain context across multiple interactions with the user.
+* Add a reranking mechanism to improve the relevance of retrieved documents.
+* Implement an agent system.
+
+== *Contact*
+
+Author: *Nahuel Tabasso*
+
+
+
