@@ -1,6 +1,14 @@
-= **RAG Platform**
-:toc:
+:toc: 
 :toclevels: 2
+= **RAG Platform**
+
+++++
+<div align="center">
+  <img src="demo.png" alt="Sistema RAG" width="900">
+</div>
+++++
+
+toc::[]
 
 == *Introduction*
 
