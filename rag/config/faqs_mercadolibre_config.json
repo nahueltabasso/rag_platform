@@ -3,12 +3,12 @@
     "topic": "FAQs Mercado Libre",
     "page_icon": "🏬",
     "initial_message": "Hola soy un Asistente especializado en FAQs de Mercado Libre, En que puedo ayudarte?",
-    "input_field_leyend": "Escribe tu pregunta sobre los FAQs de MercadoLibre",
+    "input_field_legend": "Escribe tu pregunta sobre los FAQs de MercadoLibre",
     "footer_message": "🏬 Asistente RAG con MMR",
     "vector_db": {
         "type": "ChromaDB",
         "collection_name": "site_mercadolibre_faq",
-        "embbedings_model": "text-embedding-3-large",
+        "embeddings_model": "text-embedding-3-large",
         "chunk_size": 1200,
         "chunk_overlap": 200
     },

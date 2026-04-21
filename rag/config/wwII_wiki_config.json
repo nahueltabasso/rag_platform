@@ -3,12 +3,12 @@
     "topic": "Segunda Guerra Mundial",
     "page_icon": "🪖",
     "initial_message": "Hola soy un Asistente especializado en la Segunda Guerra Mundial, En que puedo ayudarte?",
-    "input_field_leyend": "Escribe tu pregunta sobre la Segunda Guerra Mundial aquí...",
+    "input_field_legend": "Escribe tu pregunta sobre la Segunda Guerra Mundial aquí...",
     "footer_message": "🪖 Asistente RAG con MMR",
     "vector_db": {
         "type": "ChromaDB",
         "collection_name": "site_wwII_wikipedia",
-        "embbedings_model": "text-embedding-3-large",
+        "embeddings_model": "text-embedding-3-large",
         "chunk_size": 4000,
         "chunk_overlap": 800
     },
