@@ -1,10 +1,12 @@
 from langchain_chroma import Chroma
 from langchain_openai import OpenAIEmbeddings, ChatOpenAI
-from langchain_core.prompts import PromptTemplate
-from langchain_core.runnables import RunnablePassthrough
+from langchain_core.prompts import PromptTemplate, ChatPromptTemplate, MessagesPlaceholder
 from langchain_core.output_parsers import StrOutputParser
+from langchain_core.chat_history import InMemoryChatMessageHistory
+from langchain_core.runnables.history import RunnableWithMessageHistory
 from langchain_classic.retrievers.multi_query import MultiQueryRetriever
 from langchain_classic.retrievers.ensemble import EnsembleRetriever 
+from operator import itemgetter
 from utils import format_documents
 import os
 import json
@@ -35,10 +37,7 @@ class RAGService:
                 self.set_config(config_path)
             return
 
-        if not os.path.exists(config_path):
-            raise Exception(f"Config file not found: {config_path}")
-        with open(config_path, 'r') as f:
-            self.config = json.load(f)
+        self.config = self._load_config(config_path)
         self.config_path = config_path
         
         self.vector_store = None
@@ -46,10 +45,19 @@ class RAGService:
         self.llm_generation = None
         self.retriever = None
         self.rag_chain = None
+        self.rag_chain_with_memory = None
+        self.query_rewrite_chain = None
         self.documents = []
+        self.store = {}
         
         self._init_rag_system()
         self.__class__._initialized = True
+        
+    def _load_config(self, config_path: str) -> dict:
+        if not os.path.exists(config_path):
+            raise FileNotFoundError(f"Config file not found: {config_path}")
+        with open(config_path, 'r') as f:
+            return json.load(f)
         
     def set_config(self, config_path: str) -> None:
         """Set RAG system configuration
@@ -58,20 +66,28 @@ class RAGService:
             config_path (str): Path to the configuration file.
 
         Raises:
-            Exception: If the configuration file is not found.
+            FileNotFoundError: If the configuration file is not found.
         """
         logger.info(f"Setting new configuration for RAG system: {config_path}")
         config_path = str(os.path.abspath(config_path))
         if getattr(self, "config_path", None) == config_path:
             return
 
-        if not os.path.exists(config_path):
-            raise Exception(f"Config file not found: {config_path}")
-        with open(config_path, 'r') as f:
-            self.config = json.load(f)
+        self.config = self._load_config(config_path)
         self.config_path = config_path
         self.documents = []
         self._init_rag_system()
+        
+    def get_session_history(self, session_id: str):
+        if session_id not in self.store:
+            self.store[session_id] = InMemoryChatMessageHistory()    
+            
+        history = self.store[session_id]
+        max_messages = self.config.get('memory', {}).get('max_messages', 10)
+        if len(history.messages) > max_messages:
+            history.messages = history.messages[-max_messages:]
+        
+        return history
         
     def _init_rag_system(self) -> None:
         """Initialize the RAG system components based on the current configuration."""
@@ -127,23 +143,44 @@ class RAGService:
         else:
             logger.info("Initializing MMR Retriever without hybrid search")
             self.retriever = mmr_retriever  # Solo MMR
+        
         # System prompt
-        prompt = PromptTemplate.from_template(self.config.get('prompts', {}).get('system_prompt'))
-    
+        prompt = ChatPromptTemplate.from_messages([
+            ("system", self.config.get('prompts', {}).get('system_prompt')),
+            MessagesPlaceholder(variable_name="history"),
+            ("human", "Pregunta: {query}\n\nContexto:\n{context}")
+        ])
+        
+        # Rewrite query chain
+        self.query_rewrite_chain = self._build_query_rewrite_chain()
+        
         # Relevance chain to filter documents before generation
         relevance_chain = self._build_relevance_chain()
 
         self.rag_chain = (
             {
-                "query": RunnablePassthrough(),
-                "context": lambda query: self._build_context(query=query, relevance_chain=relevance_chain),
+                "query": itemgetter("query"),
+                "history": itemgetter("history"),
+                # "context": lambda query: self._build_context(query=query, relevance_chain=relevance_chain),
+                "context": lambda x: self._build_context(
+                    query=x["query"],
+                    history=x["history"],
+                    relevance_chain=relevance_chain,
+                ),
             } 
             | prompt 
             | self.llm_generation 
             | StrOutputParser()
         )
+        
+        self.rag_chain_with_memory = RunnableWithMessageHistory(
+            self.rag_chain,
+            self.get_session_history,
+            input_messages_key="query", 
+            history_messages_key="history"
+        )
 
-    def process_query(self, query: str):
+    def process_query(self, query: str, session_id: str = "default") -> tuple:
         """Process a user query through the RAG system and return the response along with relevant documents.
         
         Args:            
@@ -155,7 +192,11 @@ class RAGService:
         logger.info(f"Processing query: {query}")
         try:
             # Obtain response
-            response = self.rag_chain.invoke(query) # type: ignore
+            # response = self.rag_chain.invoke(query) # type: ignore
+            response = self.rag_chain_with_memory.invoke( # type: ignore
+                {"query": query},
+                config={"configurable": {"session_id": session_id}}
+            )
             # Obtain relevant documents
             docs = self.documents
             # Format documents for display
@@ -172,14 +213,38 @@ class RAGService:
             error_msg = f"Error al procesar la consulta: {str(e)}"
             return error_msg, []
 
+    def _build_query_rewrite_chain(self):
+        prompt = ChatPromptTemplate.from_messages([
+            ("system", self.config.get('prompts', {}).get('rewrite_query_prompt')),
+            MessagesPlaceholder(variable_name="history"),
+            ("human", "{query}"),
+        ])
+        
+        return prompt | self.llm_query | StrOutputParser() # type: ignore
+    
+    def _rewrite_query(self, query: str, history) -> str:
+        if not history:
+            return query
+        
+        rewritten_query = self.query_rewrite_chain.invoke({ # type: ignore
+            "query": query,
+            "history": history
+        })
+        rewritten_query = rewritten_query.strip()
+        logger.info(f"Original Query: '{query}")
+        logger.info(f"Rewritten Query: '{rewritten_query}'")
+        return rewritten_query or query
+        
+
     def _build_relevance_chain(self):
         relevance_prompt = PromptTemplate.from_template(
             self.config.get('prompts', {}).get('relevance_prompt')
         )
         return relevance_prompt | self.llm_query | StrOutputParser() # type: ignore
     
-    def _build_context(self, query: str, relevance_chain) -> str:
-        docs = self.retriever.invoke(query) # type: ignore
+    def _build_context(self, query: str, history: list, relevance_chain) -> str:
+        rewritten_query = self._rewrite_query(query=query, history=history)
+        docs = self.retriever.invoke(rewritten_query) # type: ignore
         relevante_docs = self._filter_relevant_documents(docs=docs,
                                                          query=query,
                                                          relevance_chain=relevance_chain)
