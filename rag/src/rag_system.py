@@ -31,6 +31,7 @@ class RAGService:
         self.llm_query = None
         self.llm_generation = None
         self.retriever = None
+        self.relevance_chain = None
         self.rag_chain = None
         self.rag_chain_with_memory = None
         self.query_rewrite_chain = None
@@ -64,34 +65,40 @@ class RAGService:
         self.documents = []
         self._init_rag_system()
         
-    def get_session_history(self, session_id: str) -> InMemoryChatMessageHistory:
-        if session_id not in self.store:
-            self.store[session_id] = InMemoryChatMessageHistory()    
-            
-        history = self.store[session_id]
-        # max_messages = self.config.get('memory', {}).get('max_messages', 10)
-        max_messages = self.config.memory.max_messages
-        if len(history.messages) > max_messages:
-            history.messages = history.messages[-max_messages:]
-        
-        return history
-        
     def _init_rag_system(self) -> None:
         """Initialize the RAG system components based on the current configuration."""
-        
         # Initialize the Chroma Vector Store
+        self._load_vector_store()
+        # Load model
+        self._load_llms_models()
+        # Build retriever
+        self._build_retriever()
+        # Rewrite query chain
+        self._build_query_rewrite_chain()
+        # Relevance chain to filter documents before generation
+        self._build_relevance_chain()
+        # Build the main RAG chain
+        self._build_rag_chain()
+        
+    def _load_vector_store(self) -> None:
         self.vector_store = Chroma(
             collection_name=self.config.vector_db.collection_name,
             embedding_function=OpenAIEmbeddings(model=self.config.vector_db.embeddings_model),
             persist_directory=os.getenv("CHROMA_DB_PATH", "./chroma_db")
         )
-        logger.info("Chroma vector store initialized successfully.")
-        
-        # Load model
+        logger.info("Chroma vector store initialized successfully.")    
+
+    def _load_llms_models(self) -> None:
         self.llm_query = ChatOpenAI(model=self.config.models.query_model, temperature=0.0)
         self.llm_generation = ChatOpenAI(model=self.config.models.generation_model, temperature=0.0)
         logger.info("LLM models loaded successfully")
-
+        
+    def _build_retriever(self) -> None:
+        if self.vector_store is None:
+            raise ValueError("Vector store must be initialized before building retriever.")
+        if self.llm_query is None:
+            raise ValueError("LLM query model must be initialized before building retriever.")
+        
         # Retriever MMR (Maximal Marginal Relevance) 
         base_retriever = self.vector_store.as_retriever(
             search_type=self.config.mmr.search_type,
@@ -101,25 +108,17 @@ class RAGService:
                 "fetch_k": self.config.mmr.mmr_fetch_k
             }
         )
-        
         # Retriever with cosine similarity
         similarity_retriever = self.vector_store.as_retriever(
             search_type="similarity",
             search_kwargs={"k": self.config.hybrid_search.search_k}
         )
-
-        # Custom prompt for MultiQueryRetriever
-        multi_query_prompt = PromptTemplate.from_template(
-            self.config.prompts.multi_query_prompt
-        )
-        
         # MultiQueryRetriever with MMR
         mmr_retriever = MultiQueryRetriever.from_llm(
             retriever=base_retriever,
             llm=self.llm_query,
-            prompt=multi_query_prompt
+            prompt=PromptTemplate.from_template(self.config.prompts.multi_query_prompt)
         )
-    
         # EnsembleRetriever to combine MMR and similarity retrievers
         if self.config.hybrid_search.enable:
             logger.info("Initializing EnsembleRetriever for hybrid search")
@@ -130,20 +129,28 @@ class RAGService:
         else:
             logger.info("Initializing MMR Retriever without hybrid search")
             self.retriever = mmr_retriever  # Solo MMR
+
+    def _build_query_rewrite_chain(self) -> None:
+        prompt = ChatPromptTemplate.from_messages([
+            ("system", self.config.prompts.rewrite_query_prompt),
+            MessagesPlaceholder(variable_name="history"),
+            ("human", "{query}"),
+        ])
+        self.query_rewrite_chain = prompt | self.llm_query | StrOutputParser() # type: ignore
+
+    def _build_relevance_chain(self) -> None:
+        relevance_prompt = PromptTemplate.from_template(
+            self.config.prompts.relevance_prompt
+        )
+        self.relevance_chain = relevance_prompt | self.llm_query | StrOutputParser() # type: ignore
         
+    def _build_rag_chain(self) -> None:
         # System prompt
         prompt = ChatPromptTemplate.from_messages([
             ("system", self.config.prompts.system_prompt),
             MessagesPlaceholder(variable_name="history"),
             ("human", "Pregunta: {query}\n\nContexto:\n{context}")
         ])
-        
-        # Rewrite query chain
-        self.query_rewrite_chain = self._build_query_rewrite_chain()
-        
-        # Relevance chain to filter documents before generation
-        relevance_chain = self._build_relevance_chain()
-
         self.rag_chain = (
             {
                 "query": itemgetter("query"),
@@ -151,11 +158,11 @@ class RAGService:
                 "context": lambda x: self._build_context(
                     query=x["query"],
                     history=x["history"],
-                    relevance_chain=relevance_chain,
+                    relevance_chain=self.relevance_chain,
                 ),
             } 
             | prompt 
-            | self.llm_generation 
+            | self.llm_generation  # type: ignore
             | StrOutputParser()
         )
         
@@ -165,6 +172,17 @@ class RAGService:
             input_messages_key="query", 
             history_messages_key="history"
         )
+        
+    def get_session_history(self, session_id: str) -> InMemoryChatMessageHistory:
+        if session_id not in self.store:
+            self.store[session_id] = InMemoryChatMessageHistory()    
+            
+        history = self.store[session_id]
+        max_messages = self.config.memory.max_messages
+        if len(history.messages) > max_messages:
+            history.messages = history.messages[-max_messages:]
+        
+        return history
 
     def process_query(self, query: str, session_id: str = "default") -> tuple:
         """Process a user query through the RAG system and return the response along with relevant documents.
@@ -200,14 +218,6 @@ class RAGService:
             error_msg = f"Error al procesar la consulta: {str(e)}"
             return error_msg, []
 
-    def _build_query_rewrite_chain(self):
-        prompt = ChatPromptTemplate.from_messages([
-            ("system", self.config.prompts.rewrite_query_prompt),
-            MessagesPlaceholder(variable_name="history"),
-            ("human", "{query}"),
-        ])
-        
-        return prompt | self.llm_query | StrOutputParser() # type: ignore
     
     def _rewrite_query(self, query: str, history) -> str:
         if not history:
@@ -223,11 +233,6 @@ class RAGService:
         return rewritten_query or query
         
 
-    def _build_relevance_chain(self):
-        relevance_prompt = PromptTemplate.from_template(
-            self.config.prompts.relevance_prompt
-        )
-        return relevance_prompt | self.llm_query | StrOutputParser() # type: ignore
     
     def _build_context(self, query: str, history: list, relevance_chain) -> str:
         rewritten_query = self._rewrite_query(query=query, history=history)
@@ -237,7 +242,7 @@ class RAGService:
                                                          relevance_chain=relevance_chain)
         return format_documents(relevante_docs)
     
-    def _filter_relevant_documents(self, docs, query: str, relevance_chain):
+    def _filter_relevant_documents(self, docs, query: str, relevance_chain) -> list:
         logger.info(f"Filtering {len(docs)} documents for relevance to the query.")
         filtered_docs = []
         for doc in docs:
