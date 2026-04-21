@@ -157,8 +157,7 @@ class RAGService:
                 "history": itemgetter("history"),
                 "context": lambda x: self._build_context(
                     query=x["query"],
-                    history=x["history"],
-                    relevance_chain=self.relevance_chain,
+                    history=x["history"]
                 ),
             } 
             | prompt 
@@ -217,7 +216,6 @@ class RAGService:
         except Exception as e:
             error_msg = f"Error al procesar la consulta: {str(e)}"
             return error_msg, []
-
     
     def _rewrite_query(self, query: str, history) -> str:
         if not history:
@@ -232,21 +230,20 @@ class RAGService:
         logger.info(f"Rewritten Query: '{rewritten_query}'")
         return rewritten_query or query
         
-
-    
-    def _build_context(self, query: str, history: list, relevance_chain) -> str:
+    def _build_context(self, query: str, history: list) -> str:
         rewritten_query = self._rewrite_query(query=query, history=history)
         docs = self.retriever.invoke(rewritten_query) # type: ignore
         relevante_docs = self._filter_relevant_documents(docs=docs,
-                                                         query=query,
-                                                         relevance_chain=relevance_chain)
+                                                         query=rewritten_query)
         return format_documents(relevante_docs)
     
-    def _filter_relevant_documents(self, docs, query: str, relevance_chain) -> list:
+    def _filter_relevant_documents(self, docs, query: str) -> list:
         logger.info(f"Filtering {len(docs)} documents for relevance to the query.")
+        if self.relevance_chain is None:
+            return docs
         filtered_docs = []
         for doc in docs:
-            result = relevance_chain.invoke({
+            result = self.relevance_chain.invoke({
                 "chunk": doc.page_content,
                 "query": query
             })
