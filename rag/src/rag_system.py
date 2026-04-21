@@ -63,8 +63,9 @@ class RAGService:
         self.config: RAGConfig = self._load_config(config_path)
         self.config_path = config_path
         self.documents = []
+        self.store = {}
         self._init_rag_system()
-        
+
     def _init_rag_system(self) -> None:
         """Initialize the RAG system components based on the current configuration."""
         # Initialize the Chroma Vector Store
@@ -183,6 +184,9 @@ class RAGService:
         
         return history
 
+    def clear_session_history(self, session_id: str) -> None:
+        self.store.pop(session_id, None)
+
     def process_query(self, query: str, session_id: str = "default") -> tuple:
         """Process a user query through the RAG system and return the response along with relevant documents.
         
@@ -226,7 +230,7 @@ class RAGService:
             "history": history
         })
         rewritten_query = rewritten_query.strip()
-        logger.info(f"Original Query: '{query}")
+        logger.info(f"Original Query: '{query}'")
         logger.info(f"Rewritten Query: '{rewritten_query}'")
         return rewritten_query or query
         

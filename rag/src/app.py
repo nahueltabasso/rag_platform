@@ -4,12 +4,52 @@ from rag_system import get_rag_service
 import streamlit as st
 import argparse
 import json
-import os
-
+import uuid
 
 def get_config_files() -> List[str]:
     config_dir = Path(__file__).resolve().parent.parent / "config"
     return [str(path) for path in config_dir.iterdir() if path.is_file()]
+
+def build_initial_messages(config: dict) -> list[dict[str, str]]:
+    return [
+        {
+            "role": "assistant",
+            "content": config.get("initial_message", "Hola, ¿en qué puedo ayudarte?")
+        }
+    ]
+
+def create_chat_session(config: dict) -> str:
+    chat_counter = st.session_state.get("chat_counter", 0) + 1
+    session_id = uuid.uuid4().hex
+
+    st.session_state.chat_counter = chat_counter
+    st.session_state.chat_sessions[session_id] = {
+        "title": f"Chat {chat_counter}",
+        "messages": build_initial_messages(config),
+    }
+    return session_id
+
+def ensure_chat_state(config: dict) -> None:
+    if "chat_sessions" not in st.session_state:
+        st.session_state.chat_sessions = {}
+
+    if "chat_counter" not in st.session_state:
+        st.session_state.chat_counter = 0
+
+    if not st.session_state.chat_sessions:
+        session_id = create_chat_session(config)
+        st.session_state.active_session_id = session_id
+
+    if "active_session_id" not in st.session_state:
+        st.session_state.active_session_id = next(iter(st.session_state.chat_sessions))
+
+def reset_chat_state(config: dict) -> None:
+    st.session_state.chat_sessions = {}
+    st.session_state.chat_counter = 0
+    st.session_state.active_session_id = create_chat_session(config)
+
+def get_active_chat() -> dict:
+    return st.session_state.chat_sessions[st.session_state.active_session_id]
 
 def main(config_path: str):
     current_config_path = str(Path(config_path).resolve())
@@ -24,6 +64,7 @@ def main(config_path: str):
         config = json.load(f)
 
     rag_service = get_rag_service(config_path=current_config_path)
+    ensure_chat_state(config)
     
     # Page Set-Up
     st.set_page_config(
@@ -36,14 +77,8 @@ def main(config_path: str):
     st.title(config.get("name", "Sistema RAG"))
     st.divider()
 
-    # Init chat history
-    if "messages" not in st.session_state:
-        st.session_state.messages = [
-            {
-                "role": "assistant",
-                "content": config.get("initial_message", "Hola, ¿en qué puedo ayudarte?")
-            }
-        ]
+    active_chat = get_active_chat()
+
     # Sidebar
     with st.sidebar:
         selected_file = st.selectbox(
@@ -68,12 +103,24 @@ def main(config_path: str):
             with open(selected_file_path, 'r') as f:
                 new_config = json.load(f)
 
-            st.session_state.messages = [
-                {
-                    "role": "assistant",
-                    "content": new_config.get("initial_message", "Hola, ¿en qué puedo ayudarte?")
-                }
-            ]
+            reset_chat_state(new_config)
+            st.rerun()
+
+        st.markdown("**🧠 Sesiones de chat:**")
+        session_ids = list(st.session_state.chat_sessions.keys())
+        selected_session_id = st.selectbox(
+            "Chat activo",
+            options=session_ids,
+            index=session_ids.index(st.session_state.active_session_id),
+            format_func=lambda session_id: st.session_state.chat_sessions[session_id]["title"],
+        )
+
+        if selected_session_id != st.session_state.active_session_id:
+            st.session_state.active_session_id = selected_session_id
+            st.rerun()
+
+        if st.button("➕ Nuevo chat", type="primary", use_container_width=True):
+            st.session_state.active_session_id = create_chat_session(config)
             st.rerun()
         
         # Información del retriever
@@ -91,7 +138,8 @@ def main(config_path: str):
         st.divider()
         
         if st.button("🗑️ Limpiar Chat", type="secondary", use_container_width=True):
-            st.session_state.messages = []
+            rag_service.clear_session_history(st.session_state.active_session_id)
+            st.session_state.chat_sessions[st.session_state.active_session_id]["messages"] = build_initial_messages(config)
             st.rerun()
 
     # Main layout with columns
@@ -101,7 +149,7 @@ def main(config_path: str):
         st.markdown("### 💬 Chat")
         
         # Mostrar historial de mensajes
-        for message in st.session_state.messages:
+        for message in active_chat["messages"]:
             with st.chat_message(message["role"]):
                 st.markdown(message["content"])
 
@@ -109,8 +157,8 @@ def main(config_path: str):
         st.markdown("### 📄 Documentos Relevantes")
         
         # Mostrar documentos de la última consulta
-        if st.session_state.messages:
-            last_message = st.session_state.messages[-1]
+        if active_chat["messages"]:
+            last_message = active_chat["messages"][-1]
             if last_message["role"] == "assistant" and "docs" in last_message:
                 docs = last_message["docs"]
                 
@@ -122,15 +170,18 @@ def main(config_path: str):
                             st.text(doc['content'])
 
     # User Input
-    if prompt := st.chat_input(config.get("input_field_leyend", "Escribe tu pregunta aquí...")):
+    input_legend = config.get("input_field_legend", config.get("input_field_leyend", "Escribe tu pregunta aquí..."))
+    if prompt := st.chat_input(input_legend):
         # Añadir mensaje del usuario al historial
-        st.session_state.messages.append({"role": "user", "content": prompt})
+        active_chat["messages"].append({"role": "user", "content": prompt})
         
         # Generar respuesta
         with st.spinner("🔍 Analizando..."):
-            print(f"Processing query: {prompt}")
-            response, docs = rag_service.process_query(prompt)
-            st.session_state.messages.append({"role": "assistant", "content": response, "docs": docs})
+            response, docs = rag_service.process_query(
+                prompt,
+                session_id=st.session_state.active_session_id,
+            )
+            active_chat["messages"].append({"role": "assistant", "content": response, "docs": docs})
         
         # Recargar para mostrar los nuevos mensajes
         st.rerun()
