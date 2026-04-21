@@ -1,11 +1,9 @@
 import json
+from rag.src.config_schema import RAGConfig
 from rag_system import get_rag_service
 
 CONFIG_PATH = "rag/config/wwII_wiki_config.json"
 
-# with open(CONFIG_PATH, "r") as f:
-#     config = json.load(f)
-    
 rag_service = get_rag_service(CONFIG_PATH)
 
 session_id = "test_session"

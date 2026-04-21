@@ -7,10 +7,11 @@ from langchain_core.runnables.history import RunnableWithMessageHistory
 from langchain_classic.retrievers.multi_query import MultiQueryRetriever
 from langchain_classic.retrievers.ensemble import EnsembleRetriever 
 from operator import itemgetter
+from functools import lru_cache
+from rag.src.config_schema import RAGConfig
 from utils import format_documents
 import os
 import json
-
 import logging
 
 logging.basicConfig(
@@ -22,24 +23,10 @@ logger = logging.getLogger(__name__)
 
 class RAGService:
     
-    _instance = None
-    _initialized = False
-    
-    def __new__(cls, *args, **kwargs):
-        if cls._instance is None:
-            cls._instance = super(RAGService, cls).__new__(cls)
-        return cls._instance
-
     def __init__(self, config_path: str) -> None:
-        config_path = str(os.path.abspath(config_path))
-        if self.__class__._initialized:
-            if getattr(self, "config_path", None) != config_path:
-                self.set_config(config_path)
-            return
+        self.config_path = os.path.abspath(config_path)
+        self.config: RAGConfig = self._load_config(self.config_path)
 
-        self.config = self._load_config(config_path)
-        self.config_path = config_path
-        
         self.vector_store = None
         self.llm_query = None
         self.llm_generation = None
@@ -48,16 +35,15 @@ class RAGService:
         self.rag_chain_with_memory = None
         self.query_rewrite_chain = None
         self.documents = []
-        self.store = {}
-        
+        self.store: dict[str, InMemoryChatMessageHistory] = {}
+
         self._init_rag_system()
-        self.__class__._initialized = True
-        
-    def _load_config(self, config_path: str) -> dict:
+
+    def _load_config(self, config_path: str) -> RAGConfig:
         if not os.path.exists(config_path):
             raise FileNotFoundError(f"Config file not found: {config_path}")
         with open(config_path, 'r') as f:
-            return json.load(f)
+            return RAGConfig.model_validate(json.load(f))
         
     def set_config(self, config_path: str) -> None:
         """Set RAG system configuration
@@ -73,17 +59,18 @@ class RAGService:
         if getattr(self, "config_path", None) == config_path:
             return
 
-        self.config = self._load_config(config_path)
+        self.config: RAGConfig = self._load_config(config_path)
         self.config_path = config_path
         self.documents = []
         self._init_rag_system()
         
-    def get_session_history(self, session_id: str):
+    def get_session_history(self, session_id: str) -> InMemoryChatMessageHistory:
         if session_id not in self.store:
             self.store[session_id] = InMemoryChatMessageHistory()    
             
         history = self.store[session_id]
-        max_messages = self.config.get('memory', {}).get('max_messages', 10)
+        # max_messages = self.config.get('memory', {}).get('max_messages', 10)
+        max_messages = self.config.memory.max_messages
         if len(history.messages) > max_messages:
             history.messages = history.messages[-max_messages:]
         
@@ -94,36 +81,36 @@ class RAGService:
         
         # Initialize the Chroma Vector Store
         self.vector_store = Chroma(
-            collection_name=self.config.get('vector_db', {}).get('collection_name'),
-            embedding_function=OpenAIEmbeddings(model=self.config.get('vector_db', {}).get('embbedings_model')),
+            collection_name=self.config.vector_db.collection_name,
+            embedding_function=OpenAIEmbeddings(model=self.config.vector_db.embeddings_model),
             persist_directory=os.getenv("CHROMA_DB_PATH", "./chroma_db")
         )
         logger.info("Chroma vector store initialized successfully.")
         
         # Load model
-        self.llm_query = ChatOpenAI(model=self.config.get('models', {}).get('query_model'), temperature=0.0)
-        self.llm_generation = ChatOpenAI(model=self.config.get('models', {}).get('generation_model'), temperature=0.0)
+        self.llm_query = ChatOpenAI(model=self.config.models.query_model, temperature=0.0)
+        self.llm_generation = ChatOpenAI(model=self.config.models.generation_model, temperature=0.0)
         logger.info("LLM models loaded successfully")
 
         # Retriever MMR (Maximal Marginal Relevance) 
         base_retriever = self.vector_store.as_retriever(
-            search_type=self.config.get('mmr', {}).get('search_type'),
+            search_type=self.config.mmr.search_type,
             search_kwargs={
-                "k": self.config.get('mmr', {}).get('search_k'),
-                "lambda_mult": self.config.get('mmr', {}).get('mmr_diversity_lambda'),
-                "fetch_k": self.config.get('mmr', {}).get('mmr_fetch_k'),
+                "k": self.config.mmr.search_k,
+                "lambda_mult": self.config.mmr.mmr_diversity_lambda,
+                "fetch_k": self.config.mmr.mmr_fetch_k
             }
         )
         
         # Retriever with cosine similarity
         similarity_retriever = self.vector_store.as_retriever(
             search_type="similarity",
-            search_kwargs={"k": self.config.get('hybrid_search', {}).get('search_k')}
+            search_kwargs={"k": self.config.hybrid_search.search_k}
         )
 
         # Custom prompt for MultiQueryRetriever
         multi_query_prompt = PromptTemplate.from_template(
-            self.config.get('prompts', {}).get('multi_query_prompt')
+            self.config.prompts.multi_query_prompt
         )
         
         # MultiQueryRetriever with MMR
@@ -134,7 +121,7 @@ class RAGService:
         )
     
         # EnsembleRetriever to combine MMR and similarity retrievers
-        if self.config.get('hybrid_search', {}).get('enable', False):
+        if self.config.hybrid_search.enable:
             logger.info("Initializing EnsembleRetriever for hybrid search")
             self.retriever = EnsembleRetriever(
                 retrievers=[mmr_retriever, similarity_retriever],
@@ -146,7 +133,7 @@ class RAGService:
         
         # System prompt
         prompt = ChatPromptTemplate.from_messages([
-            ("system", self.config.get('prompts', {}).get('system_prompt')),
+            ("system", self.config.prompts.system_prompt),
             MessagesPlaceholder(variable_name="history"),
             ("human", "Pregunta: {query}\n\nContexto:\n{context}")
         ])
@@ -161,7 +148,6 @@ class RAGService:
             {
                 "query": itemgetter("query"),
                 "history": itemgetter("history"),
-                # "context": lambda query: self._build_context(query=query, relevance_chain=relevance_chain),
                 "context": lambda x: self._build_context(
                     query=x["query"],
                     history=x["history"],
@@ -201,13 +187,14 @@ class RAGService:
             docs = self.documents
             # Format documents for display
             docs_info = []
-            for i, doc in enumerate(docs[:self.config.get('hybrid_search', {}).get('search_k', 5)], 1):
+            for i, doc in enumerate(docs[:self.config.hybrid_search.search_k], 1):
                 doc_info = {
                     "chunk": i,
                     "content": doc.page_content[:1000] + "..." if len(doc.page_content) > 1000 else doc.page_content,
                     "url": doc.metadata.get("source", 'N/A')
                 }
                 docs_info.append(doc_info)
+            self.documents = []  # Clear documents after processing
             return response, docs_info
         except Exception as e:
             error_msg = f"Error al procesar la consulta: {str(e)}"
@@ -215,7 +202,7 @@ class RAGService:
 
     def _build_query_rewrite_chain(self):
         prompt = ChatPromptTemplate.from_messages([
-            ("system", self.config.get('prompts', {}).get('rewrite_query_prompt')),
+            ("system", self.config.prompts.rewrite_query_prompt),
             MessagesPlaceholder(variable_name="history"),
             ("human", "{query}"),
         ])
@@ -238,7 +225,7 @@ class RAGService:
 
     def _build_relevance_chain(self):
         relevance_prompt = PromptTemplate.from_template(
-            self.config.get('prompts', {}).get('relevance_prompt')
+            self.config.prompts.relevance_prompt
         )
         return relevance_prompt | self.llm_query | StrOutputParser() # type: ignore
     
@@ -265,6 +252,7 @@ class RAGService:
         self.documents = filtered_docs
         return filtered_docs
 
+@lru_cache(maxsize=None)
 def get_rag_service(config_path: str) -> RAGService:
-    return RAGService(config_path=config_path) # type: ignore
-    
+    normalized_path = os.path.abspath(config_path)
+    return RAGService(config_path=normalized_path)    
