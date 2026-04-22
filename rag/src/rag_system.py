@@ -6,6 +6,7 @@ from langchain_core.chat_history import InMemoryChatMessageHistory
 from langchain_core.runnables.history import RunnableWithMessageHistory
 from langchain_classic.retrievers.multi_query import MultiQueryRetriever
 from langchain_classic.retrievers.ensemble import EnsembleRetriever 
+from langsmith import traceable
 from operator import itemgetter
 from functools import lru_cache
 from rag.src.config_schema import RAGConfig
@@ -187,6 +188,7 @@ class RAGService:
     def clear_session_history(self, session_id: str) -> None:
         self.store.pop(session_id, None)
 
+    @traceable
     def process_query(self, query: str, session_id: str = "default") -> tuple:
         """Process a user query through the RAG system and return the response along with relevant documents.
         
@@ -199,7 +201,6 @@ class RAGService:
         logger.info(f"Processing query: {query}")
         try:
             # Obtain response
-            # response = self.rag_chain.invoke(query) # type: ignore
             response = self.rag_chain_with_memory.invoke( # type: ignore
                 {"query": query},
                 config={"configurable": {"session_id": session_id}}
