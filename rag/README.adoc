@@ -133,9 +133,11 @@ docker run --env-file ./rag/.env -v ./chroma_db:/opt/data/chroma_db rag-platform
 == *Future Features*
 
 * Develop a API Rest service to interact with the system without using the graphic interface.
-* Implement memory management to maintain context across multiple interactions with the user.
+* Implement long-term memory management to maintain context across multiple interactions with the user.
 * Add a reranking mechanism to improve the relevance of retrieved documents.
 * Implement an agent system.
+* Integrate with more LLM providers.
+* Built an API Rest service to interact with the system without using the graphic interface.
 
 == *Contact*
 
