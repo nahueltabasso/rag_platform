@@ -47,6 +47,7 @@ It is provides a simple graphic interface built with *streamlit* to interact wit
 * Containerization with Docker for easy deployment.
 * Environment variable configuration for flexible deployment.
 * Short-term memory management to maintain context across interactions.
+* Integration with LangSmith for tracing and monitoring.
 
 == *Technologies Used*
 
@@ -64,6 +65,10 @@ To execute the crawler, you need to set the following environment variables in t
 ----
 OPENAI_API_KEY=<your_openai_api_key>
 CHROMA_DB_PATH=<your_chroma_db_path>
+LANGSMITH_TRACING=true
+LANGSMITH_API_KEY=<your_langsmith_api_key>
+LANGSMITH_ENDPOINT=https://api.smith.langchain.com
+LANGSMITH_PROJECT="<your_langsmith_project_name>"
 ----
 
 == *Running without Docker*
