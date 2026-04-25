@@ -2,17 +2,17 @@
 :toclevels: 2
 = **RAG Platform**
 
-++++
-<div align="center">
-  <img src="demo.png" alt="Sistema RAG" width="900">
-</div>
-++++
-
 toc::[]
 
 == *Introduction*
 
-`RAG Platform` is the last component of this project, and it is responsible for providing a question-answering service based
+++++
+<div align="center">
+  <img src="assets/CoU_Diagram.jpg" alt="Sistema RAG" width="900">
+</div>
+++++
+
+`RAG Platform` is the last component of this project, and it is responsible for providing a question-answering with short term memory service based
 on the data collected by the `crawler` component. It is designed to be flexible and extensible, allowing for the integration of various question-answering srategies. 
 
 This software component is built using Python, LangChain Framework and ChromaDB as the vector Database. It was developed to use a JSON-formatted configuration file, making it generic for any type of question/answer on any topic.
@@ -30,6 +30,14 @@ Currently, it is configure to use the `rag_chain`, which retrieves relevant docu
 
 It is provides a simple graphic interface built with *streamlit* to interact with the system and test its capabilities.
 
+=== *Pipeline*
+
+++++
+<div align="center">
+  <img src="assets/Example_Diagram.jpg" alt="Sistema RAG" width="900">
+</div>
+++++
+
 == *Features*
 
 * Question-answering service based on retrieved documents.
@@ -38,6 +46,7 @@ It is provides a simple graphic interface built with *streamlit* to interact wit
 * Error handling and logging for robust operation.
 * Containerization with Docker for easy deployment.
 * Environment variable configuration for flexible deployment.
+* Short-term memory management to maintain context across interactions.
 
 == *Technologies Used*
 
@@ -104,11 +113,19 @@ Then run the container:
 docker run --env-file ./rag/.env -v ./chroma_db:/opt/data/chroma_db rag-platform-rag
 ----
 
+== *User Interface*
+
+++++
+<div align="center">
+  <img src="assets/demo.png" alt="Sistema RAG" width="900">
+</div>
+++++
+
 == *Notes*
 
 * For local development, Python 3.12 is recommended.
 
-== *Futures Features*
+== *Future Features*
 
 * Develop a API Rest service to interact with the system without using the graphic interface.
 * Implement memory management to maintain context across multiple interactions with the user.
