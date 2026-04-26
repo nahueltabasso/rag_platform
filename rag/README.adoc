@@ -1,6 +1,6 @@
 :toc: 
 :toclevels: 2
-= **RAG Platform**
+= **RAG System**
 
 toc::[]
 
