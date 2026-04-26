@@ -1,0 +1,93 @@
+:toc: 
+:toclevels: 2
+
+= *RAG PROJECT README* 
+
+== *Introduction*
+
+++++
+<div align="center">
+  <img src="RAG-DIAGRAM.jpg" alt="Sistema RAG" width="900">
+</div>
+++++
+
+This is a general *README* file for the project. It is divided in 3 software components:
+
+* **RAG System**: This is the main component of the project, responsible for processing user queries, retrieving relevant information from the vector store, and generating responses using LLMs. It is implemented in the `rag_system.py` file.
+
+For more details about the RAG System, please refer to the link:https://github.com/nahueltabasso/rag_platform/blob/feature/basic_memory/rag/README.adoc[RAG System README].
+
+* **Crawler**: This component is responsible for collecting and processing data from differents web sites. 
+
+For more details about the Crawler, please refer to the link:https://github.com/nahueltabasso/rag_platform/blob/feature/basic_memory/crawler/README.adoc[Crawler README].
+
+* **API AI**: This component is responsible for providing APIs Rest services to generate chunks and embeddings for our documents.
+
+For more details about the API AI, please refer to the link:https://github.com/nahueltabasso/rag_platform/blob/feature/basic_memory/api_ai/README.adoc[API AI README].
+
+== *Technologies Used*
+
+* Python 3.12 recommended
+* LangChain
+* LangChain OpenAI
+* ChromaDB
+* Docker
+* Scrapy
+* FastAPI
+* Uvicorn
+* Streamlit
+* LangSmith
+
+== *Getting Started*
+
+To get started with the project, follow these steps:
+
+1. Clone the repository to your local machine.
+2. If you want to run a specific component, navigate to its directory and follow the instructions in its README file.
+
+=== *Running with Poetry*
+
+* Previously, you need to install Poetry as a dependency manaager. You can do this by following the instructions on the link:https://python-poetry.org/docs/#installation[Poetry website].
+
+==== *Step 1: Install dependencies*
+
+[source,bash]
+----
+poetry install
+----
+
+==== *Step 2: Activate the virtual environment*
+
+[source,bash]
+----
+poetry shell
+----
+
+==== *Step 3: Run the desired component*
+[source,bash]
+----
+poetry run <command_to_run_component>
+----
+
+=== *Running with Docker Compose*
+
+* You can also run the entire project using Docker Compose. This will start all the components in separate containers. For this, previously, you need to have Docker and Docker Compose installed on your machine.
+
+==== *Step 1: Build the Docker images*
+
+[source,bash]
+----
+docker-compose build
+----
+
+==== *Step 2: Start the containers*
+
+[source,bash]
+----
+docker-compose up -d
+----
+
+== *Contact*
+
+Author: *Nahuel Tabasso*
+s
