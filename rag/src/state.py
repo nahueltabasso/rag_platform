@@ -7,11 +7,13 @@ from langgraph.graph.message import add_messages
 # Extended State which combine messages with vector memory
 class AppState(TypedDict):
     """State that combines LangGraph messages with vector memory."""
+    
     messages: Annotated[List[BaseMessage], add_messages]
     vector_memories: List[str] # Vector memories actives IDs
     user_profile: Dict[str, Any] # User profile information
     last_memory_extraction: Optional[str] # Last processed message for memory extraction
 
+    query: str
     rewritten_query: str
     context_docs: List[Document]
-    
+    formatted_context: str
