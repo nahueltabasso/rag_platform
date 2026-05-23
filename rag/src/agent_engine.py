@@ -1,16 +1,16 @@
 from langchain.messages import HumanMessage
 from langchain_openai import ChatOpenAI
+from langchain_core.messages import AIMessage, trim_messages
 from langgraph.checkpoint.sqlite import SqliteSaver
 from langgraph.graph import END, START, StateGraph
-from langchain_core.messages import AIMessage, trim_messages
+from langsmith import traceable
+from typing import Dict
 from rag.src.config import DATA_DIR
 from rag.src.rag_system import RAGService
-import sqlite3
-import os
-
 from rag.src.state import AppState
 from rag.src.utils import format_documents
-from typing import Dict
+import sqlite3
+import os
 
 class MemoryRAGAgentEngine:
     
@@ -30,11 +30,15 @@ class MemoryRAGAgentEngine:
         )
         # Set a global checkpointer for the system
         self._init_checkpointer()
+        self.workflow = self._build_workflow()
         
         
     def _init_checkpointer(self) -> None:
         """Initialize a global checkpointer for the system."""  
-        conn = sqlite3.connect(os.path.join(DATA_DIR, "memory_checkpointer.db"))
+        conn = sqlite3.connect(
+            os.path.join(DATA_DIR, "memory_checkpointer.db"),
+            check_same_thread=False,
+        )
         self.checkpointer = SqliteSaver(conn)
         
         
@@ -60,6 +64,7 @@ class MemoryRAGAgentEngine:
         
         
     def rewrite_query_node(self, state: AppState) -> Dict:
+        """Node to rewrite the user query based on the conversation history."""
         query = state["query"]
         history = state["messages"]
         if history and isinstance(history[-1], HumanMessage):
@@ -73,6 +78,7 @@ class MemoryRAGAgentEngine:
         return {"rewritten_query": rewritten_query}
         
     def retrieve_documents_node(self, state: AppState) -> Dict:
+        """Node to retrieve documents based on the rewritten query."""
         query = state["rewritten_query"]
         
         if not query or query.strip() == "":
@@ -82,6 +88,7 @@ class MemoryRAGAgentEngine:
         return {"context_docs": docs}
         
     def filter_relevant_documents_node(self, state: AppState) -> Dict:
+        """Node to filter the retrieved documents based on their relevance to the query."""
         docs = state["context_docs"]
         query = state["rewritten_query"]
         
@@ -95,6 +102,7 @@ class MemoryRAGAgentEngine:
         return {"context_docs": relevants_docs}
     
     def format_context_node(self, state: AppState) -> Dict:
+        """Node to format a context."""
         docs = state["context_docs"]
         if not docs:
             return {"formatted_context": "No se encontraron documentos relevantes."}
@@ -102,6 +110,7 @@ class MemoryRAGAgentEngine:
         return {"formatted_context": context}
     
     def generate_response_node(self, state: AppState) -> Dict:
+        """Node to generate a response to a user query based on the context provided by the retrieved documents."""
         query = state["rewritten_query"]
         messages = state["messages"]
         context = state["formatted_context"]
@@ -118,3 +127,16 @@ class MemoryRAGAgentEngine:
         )
         return {"messages": [AIMessage(content=response)]}
     
+    @traceable
+    def chat(self, message: str, thread_id: str="default"):
+        try:
+            config = {"configurable": {"thread_id": thread_id}}
+            
+            result = self.workflow.invoke(
+                {"messages": [HumanMessage(content=message)], "query": message}, config # type: ignore
+            )
+            
+            assistant_response = result["messages"][-1].content
+            return assistant_response
+        except Exception as e:
+            raise e

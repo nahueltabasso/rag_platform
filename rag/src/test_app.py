@@ -1,8 +1,12 @@
+from rag.src.agent_engine import MemoryRAGAgentEngine
 from rag_system import get_rag_service
 
 CONFIG_PATH = "rag/config/wwII_wiki_config.json"
 
 rag_service = get_rag_service(CONFIG_PATH)
+
+engine = MemoryRAGAgentEngine(user_id="test_user", rag_service=rag_service)
+workflow = engine.workflow
 
 session_id = "test_session"
 
@@ -19,7 +23,8 @@ while True:
         print("Exiting...")
         break
     
-    response, _ = rag_service.process_query(query=user_input, session_id=session_id)
+    response = engine.chat(message=user_input, thread_id=session_id)
+    
     print(f"Assistant: {response}\n\n") # type: ignore
     
     

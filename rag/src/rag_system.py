@@ -1,20 +1,13 @@
-from typing import List
-
 from langchain_chroma import Chroma
 from langchain_openai import OpenAIEmbeddings, ChatOpenAI
 from langchain_core.prompts import PromptTemplate, ChatPromptTemplate, MessagesPlaceholder
 from langchain_core.output_parsers import StrOutputParser
-from langchain_core.chat_history import InMemoryChatMessageHistory
-from langchain_core.runnables.history import RunnableWithMessageHistory
 from langchain_classic.retrievers.multi_query import MultiQueryRetriever
 from langchain_classic.retrievers.ensemble import EnsembleRetriever 
-from langgraph.graph import StateGraph
 from langsmith import traceable
-from operator import itemgetter
+from typing import List
 from functools import lru_cache
 from rag.src.config_schema import RAGConfig
-from utils import format_documents
-from state import AppState
 import os
 import json
 import logging
@@ -38,10 +31,7 @@ class RAGService:
         self.retriever = None
         self.relevance_chain = None
         self.rag_chain = None
-        self.rag_chain_with_memory = None
         self.query_rewrite_chain = None
-        self.documents = []
-        self.store: dict[str, InMemoryChatMessageHistory] = {}
 
         self._init_rag_system()
 
@@ -67,8 +57,6 @@ class RAGService:
 
         self.config: RAGConfig = self._load_config(config_path)
         self.config_path = config_path
-        self.documents = []
-        self.store = {}
         self._init_rag_system()
 
     def _init_rag_system(self) -> None:
@@ -157,75 +145,9 @@ class RAGService:
             MessagesPlaceholder(variable_name="history"),
             ("human", "Pregunta: {query}\n\nContexto:\n{context}")
         ])
-        self.rag_chain = (
-            {
-                "query": itemgetter("query"),
-                "history": itemgetter("history"),
-                "context": lambda x: self._build_context(
-                    query=x["query"],
-                    history=x["history"]
-                ),
-            } 
-            | prompt 
-            | self.llm_generation  # type: ignore
-            | StrOutputParser()
-        )
+        self.rag_chain = prompt | self.llm_generation | StrOutputParser()  # type: ignore
         
-        self.rag_chain_with_memory = RunnableWithMessageHistory(
-            self.rag_chain,
-            self.get_session_history,
-            input_messages_key="query", 
-            history_messages_key="history"
-        )
-        
-    def get_session_history(self, session_id: str) -> InMemoryChatMessageHistory:
-        if session_id not in self.store:
-            self.store[session_id] = InMemoryChatMessageHistory()    
-            
-        history = self.store[session_id]
-        max_messages = self.config.memory.max_messages
-        if len(history.messages) > max_messages:
-            history.messages = history.messages[-max_messages:]
-        
-        return history
-
-    def clear_session_history(self, session_id: str) -> None:
-        self.store.pop(session_id, None)
-
     @traceable
-    def process_query(self, query: str, session_id: str = "default") -> tuple:
-        """Process a user query through the RAG system and return the response along with relevant documents.
-        
-        Args:            
-            query (str): The user query to process.
-            
-        Returns:
-            tuple: A tuple containing the response string and a list of relevant documents information.
-        """
-        logger.info(f"Processing query: {query}")
-        try:
-            # Obtain response
-            response = self.rag_chain_with_memory.invoke( # type: ignore
-                {"query": query},
-                config={"configurable": {"session_id": session_id}}
-            )
-            # Obtain relevant documents
-            docs = self.documents
-            # Format documents for display
-            docs_info = []
-            for i, doc in enumerate(docs[:self.config.hybrid_search.search_k], 1):
-                doc_info = {
-                    "chunk": i,
-                    "content": doc.page_content[:1000] + "..." if len(doc.page_content) > 1000 else doc.page_content,
-                    "url": doc.metadata.get("source", 'N/A')
-                }
-                docs_info.append(doc_info)
-            self.documents = []  # Clear documents after processing
-            return response, docs_info
-        except Exception as e:
-            error_msg = f"Error al procesar la consulta: {str(e)}"
-            return error_msg, []
-    
     def rewrite_query(self, query: str, history) -> str:
         if not history:
             return query
@@ -239,19 +161,13 @@ class RAGService:
         logger.info(f"Rewritten Query: '{rewritten_query}'")
         return rewritten_query or query
         
-    def _build_context(self, query: str, history: list) -> str:
-        rewritten_query = self.rewrite_query(query=query, history=history)
-        docs = self.retriever.invoke(rewritten_query) # type: ignore
-        relevante_docs = self.filter_relevant_documents(docs=docs,
-                                                         query=rewritten_query)
-        return format_documents(relevante_docs)
-    
-    
+    @traceable
     def retrieve_documents(self, query: str) -> List:
         """Retrieve relevants documents for a given query."""
         docs = self.retriever.invoke(query) # type: ignore
         return docs
     
+    @traceable
     def generate_response(self, query: str, history: list, context: str) -> str:
         """Generate a response base on the query, supported by the context."""
         if self.llm_generation is None:
@@ -272,7 +188,8 @@ class RAGService:
         })
 
         return response.strip()
-    
+
+    @traceable
     def filter_relevant_documents(self, docs, query: str) -> list:
         logger.info(f"Filtering {len(docs)} documents for relevance to the query.")
         if self.relevance_chain is None:
