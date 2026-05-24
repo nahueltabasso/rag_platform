@@ -1,24 +1,36 @@
 from langchain.messages import HumanMessage
 from langchain_openai import ChatOpenAI
+from langchain_core.prompts import ChatPromptTemplate
 from langchain_core.messages import AIMessage, trim_messages
 from langgraph.checkpoint.sqlite import SqliteSaver
 from langgraph.graph import END, START, StateGraph
 from langsmith import traceable
 from typing import Dict
 from rag.src.config import DATA_DIR
+from rag.src.config_schema import RAGConfig
 from rag.src.rag_system import RAGService
-from rag.src.state import AppState
+from rag.src.state import AppState, RouteDecisionDTO
 from rag.src.utils import format_documents
 import sqlite3
 import os
+import logging
+
+logging.basicConfig(
+    level=logging.INFO,
+    format="%(asctime)s | %(levelname)s | %(name)s | %(message)s"
+)
+
+logger = logging.getLogger(__name__)
 
 class MemoryRAGAgentEngine:
     
     def __init__(self, user_id: str, rag_service: RAGService) -> None:
         self.user_id = user_id
         self.rag_service = rag_service
+        self.config_app: RAGConfig = rag_service.config
         self.checkpointer = None
         self.llm = ChatOpenAI(model="gpt-4o", temperature=0.2)
+        self.router_llm = ChatOpenAI(model="gpt-4o-mini", temperature=0.0)
         
         # Message trimming config
         self.message_trimmer = trim_messages(
@@ -35,6 +47,8 @@ class MemoryRAGAgentEngine:
         
     def _init_checkpointer(self) -> None:
         """Initialize a global checkpointer for the system."""  
+        logger.info("Initializing checkpointer for MemoryRAGAgentEngine")
+        os.makedirs(DATA_DIR, exist_ok=True)
         conn = sqlite3.connect(
             os.path.join(DATA_DIR, "memory_checkpointer.db"),
             check_same_thread=False,
@@ -45,26 +59,99 @@ class MemoryRAGAgentEngine:
     def _build_workflow(self):
         """Build a LangGraph workflow that integrates the RAG chain with memory
         management."""
-        
+        logger.info("Building workflow for MemoryRAGAgentEngine")
         workflow = StateGraph(state_schema=AppState)
         workflow.add_node("rewrite_query", self.rewrite_query_node)
+        workflow.add_node("route_decision", self.router_node)
         workflow.add_node("retrieve_documents", self.retrieve_documents_node)
         workflow.add_node("filter_relevant_documents", self.filter_relevant_documents_node)
         workflow.add_node("format_context", self.format_context_node)
         workflow.add_node("generate_response", self.generate_response_node)
+        workflow.add_node("generate_chitchat_response", self.generate_chitchat_response_node)
+        workflow.add_node("user_memory_retrieval", self.user_memory_retrieval_node)
         
         workflow.add_edge(START, "rewrite_query")
-        workflow.add_edge("rewrite_query", "retrieve_documents")
+        workflow.add_edge("rewrite_query", "route_decision")
+        workflow.add_conditional_edges("route_decision", 
+                                       lambda state: state["route_decision"],
+                                       {
+                                            # Mapp: "Pydantic Value" - "Next node"
+                                            "EXPERT_RAG": "retrieve_documents",
+                                            "USER_MEMORY": "user_memory_retrieval",
+                                            "CHITCHAT": "generate_chitchat_response"
+                                       })
+        # workflow.add_edge("rewrite_query", "retrieve_documents")
         workflow.add_edge("retrieve_documents", "filter_relevant_documents")
         workflow.add_edge("filter_relevant_documents", "format_context")
         workflow.add_edge("format_context", "generate_response")    
         workflow.add_edge("generate_response", END)
         
-        return workflow.compile(checkpointer=self.checkpointer)
+        # Memory User workflow
+        workflow.add_edge("user_memory_retrieval", END)
         
+        # Chitchat workflow
+        workflow.add_edge("generate_chitchat_response", END)
+        
+        return workflow.compile(checkpointer=self.checkpointer)
+    
+    def generate_chitchat_response_node(self, state: AppState) -> Dict:
+        """Node to generate a response for chitchat queries."""
+        logger.info("Enter to generate_chitchat_response_node()")
+        return {"messages": [AIMessage(content="Hola! Este es un mensaje predeterminado del generate chitchat response node")]}
+    
+    def user_memory_retrieval_node(self, state: AppState) -> Dict:
+        """Node to retrieve user memory."""
+        logger.info("Enter to user_memory_retrieval_node()")
+        return {"messages": [AIMessage(content="Hola! Este es un mensaje predeterminado del user memory retrieval node")]}
+        
+    def router_node(self, state: AppState) -> Dict:
+        """Node to route que user input to a specific workflow path based on the content of the message."""
+        logger.info("Enter to router_node()")
+        query = state["rewritten_query"]
+        
+        if query is None or query.strip() == "":
+            raise ValueError("Query can not be empty.")
+        
+        prompt = """Eres un enrutador lógico (router) de un sistema de Inteligencia Artificial.
+            Tu única tarea es analizar la consulta del usuario y decidir qué base de datos debe consultar el sistema para responder adecuadamente.
+
+            Debes clasificar la consulta en EXACTAMENTE UNA de las siguientes 3 categorías. No agregues texto adicional, signos de puntuación ni explicaciones, SOLO la palabra en mayúsculas.
+
+            CATEGORÍAS PERMITIDAS:
+            1. EXPERT_RAG : La consulta requiere buscar información sobre la Segunda Guerra Mundial, historia militar, batallas, personajes históricos o armamento.
+            2. USER_MEMORY : La consulta requiere buscar en el perfil del usuario. Aplica cuando el usuario hace referencia a sí mismo, sus proyectos, sus gustos, cosas que contó en el pasado o pide que le recuerdes algo personal.
+            3. CHITCHAT : Saludos, despedidas, agradecimientos o charla genérica que el LLM puede responder sin buscar en ninguna base de datos.
+
+            EJEMPLOS:
+            Consulta: "¿Cuándo fue el desembarco de Normandía?"
+            Salida: EXPERT_RAG
+
+            Consulta: "¿Te acuerdas en qué lenguaje de programación estoy trabajando?"
+            Salida: USER_MEMORY
+
+            Consulta: "¡Hola! Buenos días."
+            Salida: CHITCHAT
+
+            Consulta: {query}
+            Salida:
+        """
+        
+        router_prompt = ChatPromptTemplate.from_messages([
+            ("system", prompt),
+            ("human", query)
+        ])
+        
+        structured_router = self.router_llm.with_structured_output(RouteDecisionDTO)
+        router_chain = router_prompt | structured_router
+        result: RouteDecisionDTO = router_chain.invoke({"query": query}) # type: ignore
+        
+        logger.info(f"[Router Decision] - {result.route} - for query: '{query}'")
+
+        return {"route_decision": result.route}
         
     def rewrite_query_node(self, state: AppState) -> Dict:
         """Node to rewrite the user query based on the conversation history."""
+        logger.info("Enter to rewrite_query_node()")
         query = state["query"]
         history = state["messages"]
         if history and isinstance(history[-1], HumanMessage):
@@ -79,6 +166,7 @@ class MemoryRAGAgentEngine:
         
     def retrieve_documents_node(self, state: AppState) -> Dict:
         """Node to retrieve documents based on the rewritten query."""
+        logger.info("Enter to retrieve_documents_node()")
         query = state["rewritten_query"]
         
         if not query or query.strip() == "":
@@ -89,6 +177,7 @@ class MemoryRAGAgentEngine:
         
     def filter_relevant_documents_node(self, state: AppState) -> Dict:
         """Node to filter the retrieved documents based on their relevance to the query."""
+        logger.info("Enter to filter_relevant_documents_node()")
         docs = state["context_docs"]
         query = state["rewritten_query"]
         
@@ -103,6 +192,7 @@ class MemoryRAGAgentEngine:
     
     def format_context_node(self, state: AppState) -> Dict:
         """Node to format a context."""
+        logger.info("Enter to format_context_node()")
         docs = state["context_docs"]
         if not docs:
             return {"formatted_context": "No se encontraron documentos relevantes."}
@@ -111,6 +201,7 @@ class MemoryRAGAgentEngine:
     
     def generate_response_node(self, state: AppState) -> Dict:
         """Node to generate a response to a user query based on the context provided by the retrieved documents."""
+        logger.info("Enter to generate_response_node()")
         query = state["rewritten_query"]
         messages = state["messages"]
         context = state["formatted_context"]
@@ -125,13 +216,14 @@ class MemoryRAGAgentEngine:
             history=history,
             context=context
         )
+        logger.info(f"[RAG_EXPERT] Response -> '{response}' for query: '{query}'")
         return {"messages": [AIMessage(content=response)]}
     
     @traceable
     def chat(self, message: str, thread_id: str="default"):
         try:
             config = {"configurable": {"thread_id": thread_id}}
-            
+            logger.info(f"Chat invoked with message: '{message}' and thread_id: '{thread_id}'")
             result = self.workflow.invoke(
                 {"messages": [HumanMessage(content=message)], "query": message}, config # type: ignore
             )
