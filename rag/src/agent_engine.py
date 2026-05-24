@@ -1,11 +1,11 @@
 from langchain.messages import HumanMessage
 from langchain_openai import ChatOpenAI
-from langchain_core.prompts import ChatPromptTemplate
+from langchain_core.prompts import ChatPromptTemplate, MessagesPlaceholder
 from langchain_core.messages import AIMessage, trim_messages
 from langgraph.checkpoint.sqlite import SqliteSaver
 from langgraph.graph import END, START, StateGraph
 from langsmith import traceable
-from typing import Dict
+from typing import Dict, List
 from rag.src.config import DATA_DIR
 from rag.src.config_schema import RAGConfig
 from rag.src.rag_system import RAGService
@@ -70,17 +70,17 @@ class MemoryRAGAgentEngine:
         workflow.add_node("generate_chitchat_response", self.generate_chitchat_response_node)
         workflow.add_node("user_memory_retrieval", self.user_memory_retrieval_node)
         
-        workflow.add_edge(START, "rewrite_query")
-        workflow.add_edge("rewrite_query", "route_decision")
+        workflow.add_edge(START, "route_decision")
         workflow.add_conditional_edges("route_decision", 
                                        lambda state: state["route_decision"],
                                        {
                                             # Mapp: "Pydantic Value" - "Next node"
-                                            "EXPERT_RAG": "retrieve_documents",
+                                            "EXPERT_RAG": "rewrite_query",
                                             "USER_MEMORY": "user_memory_retrieval",
                                             "CHITCHAT": "generate_chitchat_response"
                                        })
-        # workflow.add_edge("rewrite_query", "retrieve_documents")
+        # RAG Expert workflow
+        workflow.add_edge("rewrite_query", "retrieve_documents")
         workflow.add_edge("retrieve_documents", "filter_relevant_documents")
         workflow.add_edge("filter_relevant_documents", "format_context")
         workflow.add_edge("format_context", "generate_response")    
@@ -107,8 +107,10 @@ class MemoryRAGAgentEngine:
     def router_node(self, state: AppState) -> Dict:
         """Node to route que user input to a specific workflow path based on the content of the message."""
         logger.info("Enter to router_node()")
-        query = state["rewritten_query"]
+        query = state["query"]
+        history = state["messages"]
         
+        history = self._get_history_chat(history=history, query=query)
         if query is None or query.strip() == "":
             raise ValueError("Query can not be empty.")
         
@@ -116,6 +118,8 @@ class MemoryRAGAgentEngine:
             Tu única tarea es analizar la consulta del usuario y decidir qué base de datos debe consultar el sistema para responder adecuadamente.
 
             Debes clasificar la consulta en EXACTAMENTE UNA de las siguientes 3 categorías. No agregues texto adicional, signos de puntuación ni explicaciones, SOLO la palabra en mayúsculas.
+            
+            IMPORTANTE: Para clasificar la consulta debes tener el cuenta el contexto de la conversacion.
 
             CATEGORÍAS PERMITIDAS:
             1. EXPERT_RAG : La consulta requiere buscar información sobre la Segunda Guerra Mundial, historia militar, batallas, personajes históricos o armamento.
@@ -138,12 +142,15 @@ class MemoryRAGAgentEngine:
         
         router_prompt = ChatPromptTemplate.from_messages([
             ("system", prompt),
+            MessagesPlaceholder(variable_name="history"),
             ("human", query)
         ])
         
         structured_router = self.router_llm.with_structured_output(RouteDecisionDTO)
         router_chain = router_prompt | structured_router
-        result: RouteDecisionDTO = router_chain.invoke({"query": query}) # type: ignore
+        result: RouteDecisionDTO = router_chain.invoke(
+            {"query": query, "history": history}
+        ) # type: ignore
         
         logger.info(f"[Router Decision] - {result.route} - for query: '{query}'")
 
@@ -154,12 +161,7 @@ class MemoryRAGAgentEngine:
         logger.info("Enter to rewrite_query_node()")
         query = state["query"]
         history = state["messages"]
-        if history and isinstance(history[-1], HumanMessage):
-            last_message = history[-1]
-            if last_message.content == query:
-                history = history[:-1]
-                
-        history = self.message_trimmer.invoke(history) # type: ignore
+        history = self._get_history_chat(history=history, query=query)
         rewritten_query = self.rag_service.rewrite_query(query=query,
                                                          history=history)
         return {"rewritten_query": rewritten_query}
@@ -206,11 +208,7 @@ class MemoryRAGAgentEngine:
         messages = state["messages"]
         context = state["formatted_context"]
 
-        history = messages
-        if history and isinstance(history[-1], HumanMessage):
-            if history[-1].content == query:
-                history = history[:-1]
-        history = self.message_trimmer.invoke(history) # type: ignore
+        history = self._get_history_chat(history=messages, query=query)
         response = self.rag_service.generate_response(
             query=query,
             history=history,
@@ -231,4 +229,20 @@ class MemoryRAGAgentEngine:
             assistant_response = result["messages"][-1].content
             return assistant_response
         except Exception as e:
-            raise e
+            logger.error(f"Error processing the message: {str(e)}", exc_info=True)
+            return f"Error processing the message: {str(e)}"
+        
+    
+    def _get_history_chat(self, history: List, query: str) -> List:
+        if history and isinstance(history[-1], HumanMessage):
+            last_message = history[-1]
+            if last_message.content == query:
+                history = history[:-1]
+                
+        history = self.message_trimmer.invoke(history) # type: ignore
+        return history
+        
+        
+        
+        
+        # "feat: change workflow to init with the router node and add the history chat to router node"
