@@ -14,6 +14,7 @@ class ModelConfig(BaseModel):
     provider: Literal['OpenAI']
     query_model: str
     generation_model: str
+    router_llm: str
     
 class MMRRetrieverConfig(BaseModel):
     
@@ -34,6 +35,8 @@ class PromptConfig(BaseModel):
     multi_query_prompt: str
     relevance_prompt: str
     rewrite_query_prompt: str
+    router_prompt: str
+    chitchat_prompt: str
     
 class MemoryStateConfig(BaseModel):
     

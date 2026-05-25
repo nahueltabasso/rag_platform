@@ -30,8 +30,10 @@ class MemoryRAGAgentEngine:
         self.rag_service = rag_service
         self.config_app: RAGConfig = rag_service.config
         self.checkpointer = None
-        self.llm = ChatOpenAI(model="gpt-4o", temperature=0.2)
-        self.router_llm = ChatOpenAI(model="gpt-4o-mini", temperature=0.0)
+        self.llm = ChatOpenAI(model=self.config_app.models.generation_model, temperature=0.2)
+        self.router_llm = ChatOpenAI(model=self.config_app.models.router_llm, temperature=0.0)
+        self.router_chain = None
+        self.chitchat_chain = None
         
         # Message trimming config
         self.message_trimmer = trim_messages(
@@ -43,7 +45,34 @@ class MemoryRAGAgentEngine:
         )
         # Set a global checkpointer for the system
         self._init_checkpointer()
+        self._build_router_chain()
+        self._build_chitchat_chain()
         self.workflow = self._build_workflow()
+        
+    def _build_router_chain(self) -> None:
+        """Build the router chain to use in the router node."""
+        logger.info("Building router chain for MemoryRAGAgentEngine")
+        prompt = ChatPromptTemplate.from_messages([
+            ("system", self.config_app.prompts.router_prompt),
+            MessagesPlaceholder(variable_name="history"),
+            ("human", "{query}")
+        ])    
+        
+        structured_router = self.router_llm.with_structured_output(RouteDecisionDTO)
+        self.router_chain = prompt | structured_router
+        
+    def _build_chitchat_chain(self) -> None:
+        """Build the chitchat chain to use in the chitchat node."""
+        logger.info("Building chitchat chain for MemoryRAGAgentEngine")
+        topic = self.config_app.topic
+        prompt = self.config_app.prompts.chitchat_prompt
+        chitchat_prompt = ChatPromptTemplate.from_messages([
+            ("system", prompt.format(topic=topic)),
+            MessagesPlaceholder(variable_name="history"),
+            ("human", "{query}")
+        ])
+        self.chitchat_chain = chitchat_prompt | self.llm | StrOutputParser()  # type: ignore
+
         
     def _init_checkpointer(self) -> None:
         """Initialize a global checkpointer for the system."""  
@@ -99,24 +128,7 @@ class MemoryRAGAgentEngine:
         query = state["query"]
         history = state["messages"] 
         history = self._get_history_chat(history=history, query=query)
-        
-        topic = self.config_app.topic
-        prompt = f"""Eres un amigo cercano, inteligente, empático y muy conversacional. Tu único objetivo es mantener una charla casual, natural y fluida con el usuario, basándote exclusivamente en el historial de nuestra conversación.
-            REGLAS DE COMPORTAMIENTO ESTRICTAS:
-            1. TONO: Relajado, entusiasta y positivo. Habla de forma cercana y humana. Jamás uses frases robóticas como "Como una IA..." o "Entiendo tu punto".
-            2. ULTRA BREVE: Sé directo. Tus respuestas deben tener como MÁXIMO 2 o 3 oraciones. Evita discursos o explicaciones largas.
-            3. DINAMISMO: Si la charla lo permite, usa algún emoji sutil y cierra con una pregunta corta para mantener vivo el ida y vuelta.
-            4. ADAPTACIÓN: Espeja mi energía. Si noto desánimo, sé comprensivo; si estoy entusiasmado, sígueme el juego.
-            5. GUARDRAIL DE TEMA: Si notas que intento hacerte una pregunta técnica o específica sobre '{topic}' que requiere datos precisos, responde con onda diciendo algo como "¡Ey! De eso sé un montón, pregúntame sin miedo y lo revisamos juntos" para redirigirme, pero no inventes datos técnicos aquí.
-        """
-        chitchat_prompt = ChatPromptTemplate.from_messages([
-            ("system", prompt),
-            MessagesPlaceholder(variable_name="history"),
-            ("human", query)
-        ])
-        
-        chitchat_chain = chitchat_prompt | self.llm | StrOutputParser()  # type: ignore
-        response = chitchat_chain.invoke({"query": query, "history": history})
+        response = self.chitchat_chain.invoke({"query": query, "history": history}) # type: ignore
         
         return {"messages": [AIMessage(content=response)]}
     
@@ -135,46 +147,12 @@ class MemoryRAGAgentEngine:
         if query is None or query.strip() == "":
             raise ValueError("Query can not be empty.")
         
-        prompt = """Eres un enrutador lógico (router) de un sistema de Inteligencia Artificial.
-            Tu única tarea es analizar la consulta del usuario y decidir qué base de datos debe consultar el sistema para responder adecuadamente.
-
-            Debes clasificar la consulta en EXACTAMENTE UNA de las siguientes 3 categorías. No agregues texto adicional, signos de puntuación ni explicaciones, SOLO la palabra en mayúsculas.
-            
-            IMPORTANTE: Para clasificar la consulta debes tener el cuenta el contexto de la conversacion.
-
-            CATEGORÍAS PERMITIDAS:
-            1. EXPERT_RAG : La consulta requiere buscar información sobre la Segunda Guerra Mundial, historia militar, batallas, personajes históricos o armamento.
-            2. USER_MEMORY : La consulta requiere buscar en el perfil del usuario. Aplica cuando el usuario hace referencia a sí mismo, sus proyectos, sus gustos, cosas que contó en el pasado o pide que le recuerdes algo personal.
-            3. CHITCHAT : Saludos, despedidas, agradecimientos o charla genérica que el LLM puede responder sin buscar en ninguna base de datos.
-
-            EJEMPLOS:
-            Consulta: "¿Cuándo fue el desembarco de Normandía?"
-            Salida: EXPERT_RAG
-
-            Consulta: "¿Te acuerdas en qué lenguaje de programación estoy trabajando?"
-            Salida: USER_MEMORY
-
-            Consulta: "¡Hola! Buenos días."
-            Salida: CHITCHAT
-
-            Consulta: {query}
-            Salida:
-        """
-        
-        router_prompt = ChatPromptTemplate.from_messages([
-            ("system", prompt),
-            MessagesPlaceholder(variable_name="history"),
-            ("human", query)
-        ])
-        
-        structured_router = self.router_llm.with_structured_output(RouteDecisionDTO)
-        router_chain = router_prompt | structured_router
-        result: RouteDecisionDTO = router_chain.invoke(
+        result: RouteDecisionDTO = self.router_chain.invoke( # type: ignore
             {"query": query, "history": history}
         ) # type: ignore
         
-        logger.info(f"[Router Decision] - {result.route} - for query: '{query}'")
-
+        logger.info(f"🚦 [Router Decision] - {result.route} - for query: '{query}'")
+        
         return {"route_decision": result.route}
         
     def rewrite_query_node(self, state: AppState) -> Dict:
