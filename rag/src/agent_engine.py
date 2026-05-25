@@ -2,6 +2,7 @@ from langchain.messages import HumanMessage
 from langchain_openai import ChatOpenAI
 from langchain_core.prompts import ChatPromptTemplate, MessagesPlaceholder
 from langchain_core.messages import AIMessage, trim_messages
+from langchain_core.output_parsers import StrOutputParser
 from langgraph.checkpoint.sqlite import SqliteSaver
 from langgraph.graph import END, START, StateGraph
 from langsmith import traceable
@@ -44,7 +45,6 @@ class MemoryRAGAgentEngine:
         self._init_checkpointer()
         self.workflow = self._build_workflow()
         
-        
     def _init_checkpointer(self) -> None:
         """Initialize a global checkpointer for the system."""  
         logger.info("Initializing checkpointer for MemoryRAGAgentEngine")
@@ -54,7 +54,6 @@ class MemoryRAGAgentEngine:
             check_same_thread=False,
         )
         self.checkpointer = SqliteSaver(conn)
-        
         
     def _build_workflow(self):
         """Build a LangGraph workflow that integrates the RAG chain with memory
@@ -97,7 +96,29 @@ class MemoryRAGAgentEngine:
     def generate_chitchat_response_node(self, state: AppState) -> Dict:
         """Node to generate a response for chitchat queries."""
         logger.info("Enter to generate_chitchat_response_node()")
-        return {"messages": [AIMessage(content="Hola! Este es un mensaje predeterminado del generate chitchat response node")]}
+        query = state["query"]
+        history = state["messages"] 
+        history = self._get_history_chat(history=history, query=query)
+        
+        topic = self.config_app.topic
+        prompt = f"""Eres un amigo cercano, inteligente, empático y muy conversacional. Tu único objetivo es mantener una charla casual, natural y fluida con el usuario, basándote exclusivamente en el historial de nuestra conversación.
+            REGLAS DE COMPORTAMIENTO ESTRICTAS:
+            1. TONO: Relajado, entusiasta y positivo. Habla de forma cercana y humana. Jamás uses frases robóticas como "Como una IA..." o "Entiendo tu punto".
+            2. ULTRA BREVE: Sé directo. Tus respuestas deben tener como MÁXIMO 2 o 3 oraciones. Evita discursos o explicaciones largas.
+            3. DINAMISMO: Si la charla lo permite, usa algún emoji sutil y cierra con una pregunta corta para mantener vivo el ida y vuelta.
+            4. ADAPTACIÓN: Espeja mi energía. Si noto desánimo, sé comprensivo; si estoy entusiasmado, sígueme el juego.
+            5. GUARDRAIL DE TEMA: Si notas que intento hacerte una pregunta técnica o específica sobre '{topic}' que requiere datos precisos, responde con onda diciendo algo como "¡Ey! De eso sé un montón, pregúntame sin miedo y lo revisamos juntos" para redirigirme, pero no inventes datos técnicos aquí.
+        """
+        chitchat_prompt = ChatPromptTemplate.from_messages([
+            ("system", prompt),
+            MessagesPlaceholder(variable_name="history"),
+            ("human", query)
+        ])
+        
+        chitchat_chain = chitchat_prompt | self.llm | StrOutputParser()  # type: ignore
+        response = chitchat_chain.invoke({"query": query, "history": history})
+        
+        return {"messages": [AIMessage(content=response)]}
     
     def user_memory_retrieval_node(self, state: AppState) -> Dict:
         """Node to retrieve user memory."""
@@ -231,7 +252,6 @@ class MemoryRAGAgentEngine:
         except Exception as e:
             logger.error(f"Error processing the message: {str(e)}", exc_info=True)
             return f"Error processing the message: {str(e)}"
-        
     
     def _get_history_chat(self, history: List, query: str) -> List:
         if history and isinstance(history[-1], HumanMessage):
@@ -245,4 +265,3 @@ class MemoryRAGAgentEngine:
         
         
         
-        # "feat: change workflow to init with the router node and add the history chat to router node"
