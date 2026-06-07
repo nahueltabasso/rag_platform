@@ -8,7 +8,7 @@ toc::[]
 
 ++++
 <div align="center">
-  <img src="assets/CoU_Diagram.jpg" alt="Sistema RAG" width="900">
+  <img src="assets/CoU_Diagram_v2.jpg" alt="Sistema RAG" width="900">
 </div>
 ++++
 
