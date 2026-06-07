@@ -25,7 +25,7 @@ while True:
     
     response = engine.chat(message=user_input, thread_id=session_id)
     
-    print(f"Assistant: {response}\n\n") # type: ignore
+    print(f"Assistant: {response['response']}\n\n") # type: ignore
     
     
     

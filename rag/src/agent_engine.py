@@ -289,19 +289,50 @@ class MemoryRAGAgentEngine:
         return {"messages": [AIMessage(content=response)]}
     
     @traceable
-    def chat(self, message: str, thread_id: str="default"):
+    def chat(self, message: str, thread_id: str="default") -> Dict:
+        # try:
+        #     config = {"configurable": {"thread_id": thread_id}}
+        #     logger.info(f"Chat invoked with message: '{message}' and thread_id: '{thread_id}'")
+        #     result = self.workflow.invoke(
+        #         {"messages": [HumanMessage(content=message)], "query": message}, config # type: ignore
+        #     )
+            
+        #     assistant_response = result["messages"][-1].content
+        #     return assistant_response
+        # except Exception as e:
+        #     logger.error(f"Error processing the message: {str(e)}", exc_info=True)
+        #     return f"Error processing the message: {str(e)}"
+        """Send message a retrieve a response from chatbot."""
         try:
-            config = {"configurable": {"thread_id": thread_id}}
-            logger.info(f"Chat invoked with message: '{message}' and thread_id: '{thread_id}'")
+            # Thread config for chat
+            config = {"configurable": {"thread_id": f"user_{self.user_id}_chat_{thread_id}"}}
+            
+            # Update title with user mesage if is necessary
+            chat_info = self.memory_manager.get_chat_info(thread_id)
+            if chat_info["title"] == "Nuevo chat": # type: ignore
+                chat_title = self.memory_manager._generate_chat_title(first_message=message) # type: ignore
+                self.memory_manager.update_chat_title(thread_id=thread_id, title=chat_title) # type: ignore
+
             result = self.workflow.invoke(
                 {"messages": [HumanMessage(content=message)], "query": message}, config # type: ignore
             )
-            
             assistant_response = result["messages"][-1].content
-            return assistant_response
+            return {
+                "success": True,
+                "response": assistant_response,
+                "error": None,
+                "memories_used": len(result.get('vector_memories', [])),
+                "context_optimized": True
+            }
         except Exception as e:
-            logger.error(f"Error processing the message: {str(e)}", exc_info=True)
-            return f"Error processing the message: {str(e)}"
+            logger.error(f"Error processing the message: {str(e)}")
+            return {
+                "success": False,
+                "response": None,
+                "error": str(e),
+                "memories_used": 0,
+                "context_optimized": False
+            }
     
     def _get_history_chat(self, history: List, query: str) -> List:
         if history and isinstance(history[-1], HumanMessage):
@@ -311,7 +342,5 @@ class MemoryRAGAgentEngine:
                 
         history = self.message_trimmer.invoke(history) # type: ignore
         return history
-        
-        
         
         
