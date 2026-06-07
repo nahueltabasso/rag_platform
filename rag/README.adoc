@@ -1,6 +1,6 @@
 :toc: 
 :toclevels: 2
-= **RAG System**
+= **RAG Assistant**
 
 toc::[]
 
@@ -12,10 +12,11 @@ toc::[]
 </div>
 ++++
 
-`RAG Platform` is the last component of this project, and it is responsible for providing a question-answering with short term memory service based
-on the data collected by the `crawler` component. It is designed to be flexible and extensible, allowing for the integration of various question-answering srategies. 
+`RAG Assistant` is the last component of this project, and it is responsible for providing a question-answering with advanced memory management capabilities. It is designed to work with a `Orchestrator` component that manages the workflow and coordinates the interactions between the different components of the syste.
 
-This software component is built using Python, LangChain Framework and ChromaDB as the vector Database. It was developed to use a JSON-formatted configuration file, making it generic for any type of question/answer on any topic.
+Through a `router node` a LLM produce a decision to follow a specific path in the workflow.
+
+This software component is built using Python, LangChain and LangGraph Frameworks and ChromaDB as the vector Database. It was developed to use a JSON-formatted configuration file, making it generic for any type of question/answer on any topic.
 
 * Onboarding process
 * Question-answering strategies
@@ -40,19 +41,22 @@ It is provides a simple graphic interface built with *streamlit* to interact wit
 
 == *Features*
 
+* Integration with LangGraph for workflow management and routing.
 * Question-answering service based on retrieved documents.
+* Extraction of relevant information from user as hobbies, names, etc.
 * Integration with ChromaDB for vector storage and retrieval.
+* Checkpointer with SQLite for state management and recovery.
 * Configurable question-answering strategies.
 * Error handling and logging for robust operation.
 * Containerization with Docker for easy deployment.
 * Environment variable configuration for flexible deployment.
-* Short-term memory management to maintain context across interactions.
 * Integration with LangSmith for tracing and monitoring.
 
 == *Technologies Used*
 
 * Python 3.12 recommended
 * LangChain
+* LangGraph
 * LangChain OpenAI
 * ChromaDB
 * Docker
