@@ -11,7 +11,7 @@ from rag.src.config import DATA_DIR
 from rag.src.config_schema import RAGConfig
 from rag.src.rag_system import RAGService
 from rag.src.state import AppState, RouteDecisionDTO
-from rag.src.utils import format_documents
+from rag.src.utils import _serialize_context_docs, format_documents
 from rag.src.memory_manager import ModernMemoryManager
 import sqlite3
 import os
@@ -290,18 +290,6 @@ class MemoryRAGAgentEngine:
     
     @traceable
     def chat(self, message: str, thread_id: str="default") -> Dict:
-        # try:
-        #     config = {"configurable": {"thread_id": thread_id}}
-        #     logger.info(f"Chat invoked with message: '{message}' and thread_id: '{thread_id}'")
-        #     result = self.workflow.invoke(
-        #         {"messages": [HumanMessage(content=message)], "query": message}, config # type: ignore
-        #     )
-            
-        #     assistant_response = result["messages"][-1].content
-        #     return assistant_response
-        # except Exception as e:
-        #     logger.error(f"Error processing the message: {str(e)}", exc_info=True)
-        #     return f"Error processing the message: {str(e)}"
         """Send message a retrieve a response from chatbot."""
         try:
             # Thread config for chat
@@ -317,10 +305,12 @@ class MemoryRAGAgentEngine:
                 {"messages": [HumanMessage(content=message)], "query": message}, config # type: ignore
             )
             assistant_response = result["messages"][-1].content
+            context_docs = _serialize_context_docs(result.get("context_docs", []))
             return {
                 "success": True,
                 "response": assistant_response,
                 "error": None,
+                "docs": context_docs,
                 "memories_used": len(result.get('vector_memories', [])),
                 "context_optimized": True
             }
@@ -330,6 +320,7 @@ class MemoryRAGAgentEngine:
                 "success": False,
                 "response": None,
                 "error": str(e),
+                "docs": [],
                 "memories_used": 0,
                 "context_optimized": False
             }
