@@ -47,3 +47,8 @@ pip-wheel-metadata/
 
 # Error directory
 error/
+
+/rag/data/*
+/rag/users/*
+
+.vscode/*
