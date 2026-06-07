@@ -12,6 +12,7 @@ from rag.src.config_schema import RAGConfig
 from rag.src.rag_system import RAGService
 from rag.src.state import AppState, RouteDecisionDTO
 from rag.src.utils import format_documents
+from rag.src.memory_manager import ModernMemoryManager
 import sqlite3
 import os
 import logging
@@ -29,12 +30,14 @@ class MemoryRAGAgentEngine:
         self.user_id = user_id
         self.rag_service = rag_service
         self.config_app: RAGConfig = rag_service.config
+        self.memory_manager: ModernMemoryManager = ModernMemoryManager(user_id=user_id, config=self.config_app)
         self.checkpointer = None
         self.llm = ChatOpenAI(model=self.config_app.models.generation_model, temperature=0.2)
         self.router_llm = ChatOpenAI(model=self.config_app.models.router_llm, temperature=0.0)
         self.router_chain = None
         self.chitchat_chain = None
-        
+        self.user_profile_chain = None
+            
         # Message trimming config
         self.message_trimmer = trim_messages(
             strategy="last",
@@ -47,6 +50,7 @@ class MemoryRAGAgentEngine:
         self._init_checkpointer()
         self._build_router_chain()
         self._build_chitchat_chain()
+        self._build_user_profile_chain()
         self.workflow = self._build_workflow()
         
     def _build_router_chain(self) -> None:
@@ -73,7 +77,16 @@ class MemoryRAGAgentEngine:
         ])
         self.chitchat_chain = chitchat_prompt | self.llm | StrOutputParser()  # type: ignore
 
+    def _build_user_profile_chain(self) -> None:
+        """Build the user profile chain to use in the generation node."""
+        logger.info("Building user profile chain for MemoryRAGAgentEngine")
+        prompt = ChatPromptTemplate.from_messages([
+            ("system", self.config_app.prompts.user_profile_prompt),
+            MessagesPlaceholder(variable_name="messages"),
+        ])
         
+        self.user_profile_chain = prompt | self.llm  # type: ignore
+
     def _init_checkpointer(self) -> None:
         """Initialize a global checkpointer for the system."""  
         logger.info("Initializing checkpointer for MemoryRAGAgentEngine")
@@ -97,6 +110,9 @@ class MemoryRAGAgentEngine:
         workflow.add_node("generate_response", self.generate_response_node)
         workflow.add_node("generate_chitchat_response", self.generate_chitchat_response_node)
         workflow.add_node("user_memory_retrieval", self.user_memory_retrieval_node)
+        workflow.add_node("context_optimization", self.context_optimization_node)
+        workflow.add_node("user_profile_generate_response", self.user_profile_generate_response)
+        workflow.add_node("user_memory_extraction", self.user_memory_extraction_node)
         
         workflow.add_edge(START, "route_decision")
         workflow.add_conditional_edges("route_decision", 
@@ -115,12 +131,73 @@ class MemoryRAGAgentEngine:
         workflow.add_edge("generate_response", END)
         
         # Memory User workflow
-        workflow.add_edge("user_memory_retrieval", END)
+        workflow.add_edge("user_memory_retrieval", "context_optimization")
+        workflow.add_edge("context_optimization", "user_profile_generate_response")
+        workflow.add_edge("user_profile_generate_response", "user_memory_extraction")
+        workflow.add_edge("user_memory_extraction", END)
         
         # Chitchat workflow
         workflow.add_edge("generate_chitchat_response", END)
         
         return workflow.compile(checkpointer=self.checkpointer)
+    
+    def user_memory_retrieval_node(self, state: AppState) -> Dict:
+        """Node to retrieve user memory."""
+        logger.info("Enter to user_memory_retrieval_node()")
+        query = state["query"]
+        
+        if not query or query.strip() == "":
+            raise ValueError("Query can not be empty.")
+        
+        # Retrieve user memories based on the query and user profile
+        memories = self.memory_manager.search_vector_memory(query=query)
+        return {"vector_memories": memories}
+    
+    def context_optimization_node(self, state: AppState) -> Dict:
+        """Node to optimize the context using trim_messages."""
+        logger.info("Enter to context_optimization_node()")
+        messages = state["messages"]
+        optimized_messages = self.message_trimmer.invoke(messages) # type: ignore
+        return {"messages": optimized_messages}
+    
+    def user_profile_generate_response(self, state: AppState) -> Dict:
+        """Node to generate a response with user profile information."""
+        logger.info("Enter to user_profile_generate_response()")
+        messages = state["messages"]
+        vector_memories = state.get("vector_memories", [])
+        if not messages:
+            return {"messages": []}
+        
+        # Build system context with retrieved vector memories
+        if vector_memories:
+            context = ["Informacion relevante que recuerdas del usuario:"]
+            for memory in vector_memories:
+                context.append(f"- {memory}")
+            context_str = "\n".join(context)
+        else:
+            context_str = "No se encontraron memorias relevantes del usuario."
+        response = self.user_profile_chain.invoke({"context": context_str, "messages": messages}) # type: ignore
+        return {"messages": [response]}
+    
+    def user_memory_extraction_node(self, state: AppState) -> Dict:
+        """Node to extract structured memory from the conversation."""
+        logger.info("Enter to user_memory_extraction_node()")
+        messages = state["messages"]
+        last_extraction = state.get("last_memory_extraction", "")
+        
+        # Get the last user message
+        last_user_message = None
+        for msg in reversed(messages):
+            if isinstance(msg, HumanMessage):
+                last_user_message = msg.content
+                break
+            
+        if not last_user_message or last_user_message == last_extraction:
+            logger.info("No new user message for memory extraction.")
+            return {}
+        
+        self.memory_manager.extract_and_store_memories(user_message=last_user_message) # type: ignore
+        return {"last_memory_extraction": last_user_message}
     
     def generate_chitchat_response_node(self, state: AppState) -> Dict:
         """Node to generate a response for chitchat queries."""
@@ -132,11 +209,6 @@ class MemoryRAGAgentEngine:
         
         return {"messages": [AIMessage(content=response)]}
     
-    def user_memory_retrieval_node(self, state: AppState) -> Dict:
-        """Node to retrieve user memory."""
-        logger.info("Enter to user_memory_retrieval_node()")
-        return {"messages": [AIMessage(content="Hola! Este es un mensaje predeterminado del user memory retrieval node")]}
-        
     def router_node(self, state: AppState) -> Dict:
         """Node to route que user input to a specific workflow path based on the content of the message."""
         logger.info("Enter to router_node()")

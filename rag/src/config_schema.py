@@ -37,6 +37,7 @@ class PromptConfig(BaseModel):
     rewrite_query_prompt: str
     router_prompt: str
     chitchat_prompt: str
+    user_profile_prompt: str
     
 class MemoryStateConfig(BaseModel):
     

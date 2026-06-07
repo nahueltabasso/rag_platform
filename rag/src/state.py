@@ -1,14 +1,14 @@
 from typing import List, Dict, Any, Literal, Optional, Annotated
 from typing_extensions import TypedDict
+from pydantic import BaseModel, Field
 from langchain_core.messages import BaseMessage
 from langchain_core.documents import Document
 from langgraph.graph.message import add_messages
-from pydantic import BaseModel, Field
+from rag.src.config import CATEGORY_DESCRIPTION, CONTENT_DESCRIPTION, IMPORTANCE_DESCRIPTION, ROUTE_DECISION_DESCRIPTION
 
 # Extended State which combine messages with vector memory
 class AppState(TypedDict):
     """State that combines LangGraph messages with vector memory."""
-    
     messages: Annotated[List[BaseMessage], add_messages]
     vector_memories: List[str] # Vector memories actives IDs
     user_profile: Dict[str, Any] # User profile information
@@ -22,6 +22,10 @@ class AppState(TypedDict):
     
 class RouteDecisionDTO(BaseModel):
     """DTO for routing decisions."""
-    route: Literal["EXPERT_RAG", "USER_MEMORY", "CHITCHAT"] = Field(
-        description="La categoría exacta a la que pertenece la consulta del usuario."
-    )
+    route: Literal["EXPERT_RAG", "USER_MEMORY", "CHITCHAT"] = Field(description=ROUTE_DECISION_DESCRIPTION)
+
+class ExtractedMemory(BaseModel):
+    """Model for structured memory extracted from conversations."""
+    category: str = Field(description=CATEGORY_DESCRIPTION)
+    content: str = Field(description=CONTENT_DESCRIPTION)
+    importance: int = Field(description=IMPORTANCE_DESCRIPTION, ge=1, le=5)

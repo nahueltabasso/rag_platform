@@ -22,3 +22,4 @@ MEMORY_CATEGORIES =[
 CATEGORY_DESCRIPTION = "Categoria: personal, professional, preferencias, hechos_importantes"
 CONTENT_DESCRIPTION = "Contenido de la memoria"
 IMPORTANCE_DESCRIPTION = "Importancia del 1 al 5"
+ROUTE_DECISION_DESCRIPTION = "La categoría exacta a la que pertenece la consulta del usuario."

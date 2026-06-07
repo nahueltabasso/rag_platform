@@ -1,40 +1,24 @@
 from typing import List, Dict, Any, Optional
 from datetime import datetime
-from typing_extensions import TypedDict, Annotated
 from langchain_openai import OpenAIEmbeddings, ChatOpenAI
 from langchain_core.prompts import PromptTemplate
 from langchain_chroma import Chroma
 from langchain_core.output_parsers import PydanticOutputParser
-from langchain_core.messages import BaseMessage
-from langgraph.graph.message import add_messages
-from pydantic import BaseModel, Field
-from config import CATEGORY_DESCRIPTION, CONTENT_DESCRIPTION, IMPORTANCE_DESCRIPTION, USERS_DIR, MAX_VECTOR_RESULTS 
+from config import MAX_VECTOR_RESULTS, USERS_DIR 
+from rag.src.config_schema import RAGConfig
+from rag.src.state import ExtractedMemory
 import chromadb
 import os
 import uuid
 import json
 
-# Extended State which combine messages with vector memory
-class MemoryState(TypedDict):
-    """State that combines LangGraph messages with vector memory."""
-    messages: Annotated[List[BaseMessage], add_messages]
-    vector_memories: List[str] # Vector memories actives IDs
-    user_profile: Dict[str, Any] # User profile information
-    last_memory_extraction: Optional[str] # Last processed message for memory extraction
-    
-class ExtractedMemory(BaseModel):
-    """Model for structured memory extracted from conversations."""
-    category: str = Field(description=CATEGORY_DESCRIPTION)
-    content: str = Field(description=CONTENT_DESCRIPTION)
-    importance: int = Field(description=IMPORTANCE_DESCRIPTION, ge=1, le=5)
-    
-    
 class ModernMemoryManager:
     
-    def __init__(self, user_id: str="deafault_id") -> None:
+    def __init__(self, user_id: str="deafault_id", config: RAGConfig=None) -> None: # type: ignore
         self.user_id = user_id
         self.user_dir = os.path.join(USERS_DIR, self.user_id)
         os.makedirs(self.user_dir, exist_ok=True)
+        self.config = config
         
         # Init ChromaDB vector store for transversal memory
         self.chromadb_user_path = os.path.join(self.user_dir, "chroma_db")
