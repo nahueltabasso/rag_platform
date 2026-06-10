@@ -8,6 +8,7 @@ from langsmith import traceable
 from typing import List
 from functools import lru_cache
 from rag.src.config_schema import RAGConfig
+from concurrent.futures import ThreadPoolExecutor
 import os
 import json
 import logging
@@ -190,22 +191,35 @@ class RAGService:
         return response.strip()
 
     @traceable
-    def filter_relevant_documents(self, docs, query: str) -> list:
+    def filter_relevant_documents(self, docs: list, query: str) -> list:
         logger.info(f"Filtering {len(docs)} documents for relevance to the query.")
         if self.relevance_chain is None:
             return docs
         filtered_docs = []
-        for doc in docs:
-            result = self.relevance_chain.invoke({
-                "chunk": doc.page_content,
-                "query": query
-            })
-
-            if result.strip().upper().startswith("SI"):
+        
+        max_pool = min(len(docs), 8) 
+        if max_pool <= 1:
+            results = [self._is_relevance(doc.page_content, query) for doc in docs]
+        else:
+            with ThreadPoolExecutor(max_workers=max_pool) as executor:
+                results = list(executor.map(lambda doc: self._is_relevance(doc.page_content, query), docs))
+        for doc, is_relevant in zip(docs, results):
+            if is_relevant:
                 filtered_docs.append(doc)
         logger.info(f"{len(filtered_docs)} documents deemed relevant after filtering.")
-        # self.documents = filtered_docs
         return filtered_docs
+    
+    def _is_relevance(self, content: str, query: str) -> bool:
+        try:
+            result = self.relevance_chain.invoke({  # type: ignore[union-attr]
+                "chunk": content,
+                "query": query,
+            })
+        except Exception as exc:
+            logger.warning("Failed to evaluate document relevance: %s", exc)
+            return False
+
+        return result.strip().upper().startswith("SI")
 
 @lru_cache(maxsize=None)
 def get_rag_service(config_path: str) -> RAGService:
